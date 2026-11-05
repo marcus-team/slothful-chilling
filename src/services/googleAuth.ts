@@ -2,9 +2,8 @@
 // Chỉ cần OAuth Client ID (loại Web) trong Google Cloud, với domain app nằm trong
 // "Authorized JavaScript origins".
 
-const CLIENT_ID =
-  (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
-  '714639310234-m6hgfj5fm4asekqha4998ra7p9m7e90e.apps.googleusercontent.com';
+// Đặt trong .env.local (local) hoặc Environment Variables (Vercel): VITE_GOOGLE_CLIENT_ID
+const CLIENT_ID: string = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
@@ -58,6 +57,11 @@ interface TokenResult {
 
 // Xin access token. prompt = '' thì thử lấy âm thầm nếu người dùng đã cấp quyền trước đó.
 function requestToken(prompt: '' | 'select_account' | 'consent'): Promise<TokenResult> {
+  if (!CLIENT_ID) {
+    return Promise.reject(
+      new Error('Chưa cấu hình VITE_GOOGLE_CLIENT_ID (Google OAuth Client ID).')
+    );
+  }
   return loadGis().then(
     () =>
       new Promise<TokenResult>((resolve, reject) => {
