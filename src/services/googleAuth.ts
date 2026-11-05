@@ -5,8 +5,10 @@
 // Đặt trong .env.local (local) hoặc Environment Variables (Vercel): VITE_GOOGLE_CLIENT_ID
 const CLIENT_ID: string = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
 
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+
 const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
+  DRIVE_SCOPE,
   'openid',
   'email',
   'profile',
@@ -56,7 +58,9 @@ interface TokenResult {
 }
 
 // Xin access token. prompt = '' thì thử lấy âm thầm nếu người dùng đã cấp quyền trước đó.
-function requestToken(prompt: '' | 'select_account' | 'consent'): Promise<TokenResult> {
+function requestToken(
+  prompt: '' | 'select_account' | 'consent' | 'select_account consent'
+): Promise<TokenResult> {
   if (!CLIENT_ID) {
     return Promise.reject(
       new Error('Chưa cấu hình VITE_GOOGLE_CLIENT_ID (Google OAuth Client ID).')
@@ -71,6 +75,21 @@ function requestToken(prompt: '' | 'select_account' | 'consent'): Promise<TokenR
           callback: (resp: any) => {
             if (resp.error || !resp.access_token) {
               reject(new Error(resp.error_description || resp.error || 'Không thể lấy access token từ Google'));
+              return;
+            }
+            // Màn cấp quyền cho phép bỏ tick từng quyền: kiểm tra đã được quyền Drive chưa
+            const hasDrive = (window as any).google.accounts.oauth2.hasGrantedAllScopes(
+              resp,
+              DRIVE_SCOPE
+            );
+            if (!hasDrive) {
+              cachedAccessToken = null;
+              localStorage.removeItem(STORAGE_KEY_SESSION);
+              reject(
+                new Error(
+                  'Bạn chưa cấp quyền xem Google Drive. Hãy đăng nhập lại và tick ô "See and download all your Google Drive files".'
+                )
+              );
               return;
             }
             cachedAccessToken = resp.access_token;
@@ -140,7 +159,8 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: GoogleUser; accessToken: string }> => {
-  const { accessToken } = await requestToken('select_account');
+  // 'consent' ép Google hiện lại màn cấp quyền, để tick lại quyền Drive nếu trước đó bỏ sót
+  const { accessToken } = await requestToken('select_account consent');
   const user = await fetchUser(accessToken);
   localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify({ user } satisfies StoredSession));
   return { user, accessToken };
