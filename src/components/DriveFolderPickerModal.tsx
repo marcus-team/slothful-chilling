@@ -10,7 +10,7 @@ import {
   DisconnectOutlined,
 } from '@ant-design/icons';
 import { Novel } from '../types/novel';
-import { listDriveFolders, scanDriveForNovels, DriveFolderItem } from '../services/googleDrive';
+import { listDriveFolders, scanDriveForNovels, scanFolderAsNovel, DriveFolderItem } from '../services/googleDrive';
 import { GoogleUser } from '../services/googleAuth';
 
 interface DriveFolderPickerModalProps {
@@ -73,7 +73,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
       const detected = await scanDriveForNovels(accessToken);
       if (detected.length === 0) {
         message.info(
-          'Chưa tìm thấy thư mục truyện chứa file .txt hoặc .md trên Drive. Hãy tạo thư mục chứa các file chương truyện!'
+          'Chưa tìm thấy thư mục truyện chứa file .txt, .md hoặc .docx ở gốc Drive. Hãy tạo thư mục chứa các file chương truyện!'
         );
       } else {
         message.success(`Đã đồng bộ thành công ${detected.length} bộ truyện từ Google Drive!`);
@@ -88,16 +88,16 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
     }
   };
 
-  const handleScanSpecificFolder = async (folderId: string) => {
+  const handleScanSpecificFolder = async (folder: DriveFolderItem) => {
     if (!accessToken) return;
     setIsScanning(true);
     try {
-      const detected = await scanDriveForNovels(accessToken, folderId);
-      if (detected.length === 0) {
-        message.info('Không tìm thấy file .txt hoặc .md trong thư mục này');
+      const novel = await scanFolderAsNovel(folder, accessToken);
+      if (!novel) {
+        message.info('Không tìm thấy file .txt, .md hoặc .docx trong thư mục này');
       } else {
-        message.success(`Đã thêm ${detected.length} bộ truyện từ thư mục được chọn!`);
-        onNovelsSynced(detected);
+        message.success(`Đã thêm bộ truyện "${novel.title}" (${novel.chapters.length} chương)!`);
+        onNovelsSynced([novel]);
       }
     } catch (err: any) {
       console.error(err);
@@ -193,8 +193,8 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
             Cách tổ chức truyện trên Google Drive:
           </p>
           <ul className="list-disc pl-4 space-y-0.5">
-            <li>Mỗi thư mục = 1 bộ truyện (Tên thư mục là tên truyện).</li>
-            <li>Bên trong thư mục chứa các file chương dạng <code>01.txt</code>, <code>02.txt</code> hoặc <code>.md</code>.</li>
+            <li>Mỗi thư mục ở gốc Drive = 1 bộ truyện (Tên thư mục là tên truyện).</li>
+            <li>Chương là file <code>.txt</code>, <code>.md</code>, <code>.docx</code> hoặc Google Docs, có thể nằm trong các thư mục con (vd: <code>1-50</code>, <code>51-100</code>).</li>
             <li>slothfulchilling sẽ tự động đọc và phân mục theo số chương để bạn đọc liền mạch.</li>
           </ul>
         </div>
@@ -272,7 +272,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
                     <Button
                       size="small"
                       icon={<CloudDownloadOutlined />}
-                      onClick={() => handleScanSpecificFolder(folder.id)}
+                      onClick={() => handleScanSpecificFolder(folder)}
                       loading={isScanning}
                     >
                       Đồng bộ

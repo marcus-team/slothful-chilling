@@ -228,7 +228,7 @@ export default function App() {
             return;
           }
 
-          const text = await fetchChapterText(currentChapter.fileId, token);
+          const text = await fetchChapterText(currentChapter.fileId, token, currentChapter.mimeType);
           if (!isCancelled) {
             setContent(text);
           }

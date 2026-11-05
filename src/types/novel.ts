@@ -5,6 +5,7 @@ export interface Chapter {
   content?: string;
   wordCount?: number;
   fileId?: string;
+  mimeType?: string;
   source: 'drive' | 'builtin';
 }
 
