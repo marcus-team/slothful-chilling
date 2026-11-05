@@ -1,16 +1,12 @@
 import React from 'react';
-import { Novel, Chapter, ReadingSettings, FontFamily, ThemeMode } from '../types/novel';
-import { Popover, Tooltip } from 'antd';
+import { Novel, Chapter, ReadingSettings } from '../types/novel';
+import { Popover, Slider } from 'antd';
 import {
   MenuOutlined,
   SettingOutlined,
   CloudSyncOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
-  FontColorsOutlined,
-  FontSizeOutlined,
-  AlignLeftOutlined,
-  CheckOutlined,
 } from '@ant-design/icons';
 import { PWAInstallButton } from './PWAInstallButton';
 import { GoogleUser } from '../services/googleAuth';
@@ -27,7 +23,22 @@ interface ReaderHeaderProps {
   scrollProgress: number; // 0 to 1
   isZenMode: boolean;
   onToggleZenMode: () => void;
+  isHidden: boolean; // ẩn header khi cuộn xuống để có thêm chỗ đọc
 }
+
+const iconButton =
+  'w-11 h-11 flex items-center justify-center rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors';
+
+const sectionLabel = 'font-semibold text-neutral-500 text-xs mb-2';
+
+const optionButton = (active: boolean) =>
+  `min-h-[40px] px-2 text-center rounded-md text-sm transition-colors border ${
+    active
+      ? 'bg-neutral-900 text-white border-neutral-900 font-medium dark:bg-neutral-100 dark:text-neutral-900 dark:border-neutral-100'
+      : 'bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
+  }`;
+
+const FONT_CLASS = { sans: 'font-sans', serif: 'font-serif', mono: 'font-mono' } as const;
 
 export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
   currentNovel,
@@ -41,30 +52,126 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
   scrollProgress,
   isZenMode,
   onToggleZenMode,
+  isHidden,
 }) => {
   // Reading settings popover content
   const settingsContent = (
-    <div className="w-64 p-2 space-y-4 text-xs">
-      {/* Font Family */}
-      <div className="space-y-1.5">
-        <div className="font-semibold text-neutral-500 uppercase tracking-wider text-[10px]">
-          PHÔNG CHỮ ĐỌC
+    <div className="w-72 max-w-[80vw] p-1 space-y-5">
+      {/* Preview: thấy ngay chữ thay đổi thế nào */}
+      <div className="rounded-md border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 px-3 py-2.5 overflow-hidden">
+        <p
+          className={`${FONT_CLASS[settings.fontFamily]} text-neutral-800 dark:text-neutral-200 m-0`}
+          style={{
+            fontSize: `${settings.fontSize}px`,
+            lineHeight: settings.lineHeight,
+            textAlign: settings.textAlign,
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          Chiếc lá cuối cùng rơi xuống mặt hồ, và cả buổi chiều như chậm lại.
+        </p>
+      </div>
+
+      {/* Font Size */}
+      <div>
+        <div className={`${sectionLabel} flex items-center justify-between`}>
+          <span>Cỡ chữ</span>
+          <span className="font-mono">{settings.fontSize}px</span>
         </div>
-        <div className="grid grid-cols-3 gap-1">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => onUpdateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })}
+            disabled={settings.fontSize <= 14}
+            aria-label="Giảm cỡ chữ"
+            className="w-10 h-10 shrink-0 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 text-xs"
+          >
+            A
+          </button>
+          <Slider
+            min={14}
+            max={26}
+            step={1}
+            value={settings.fontSize}
+            onChange={(v) => onUpdateSettings({ fontSize: v })}
+            tooltip={{ open: false }}
+            className="flex-1 !my-0"
+          />
+          <button
+            onClick={() => onUpdateSettings({ fontSize: Math.min(26, settings.fontSize + 1) })}
+            disabled={settings.fontSize >= 26}
+            aria-label="Tăng cỡ chữ"
+            className="w-10 h-10 shrink-0 rounded-md border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 text-lg"
+          >
+            A
+          </button>
+        </div>
+      </div>
+
+      {/* Line height */}
+      <div>
+        <div className={sectionLabel}>Giãn dòng</div>
+        <div className="grid grid-cols-3 gap-1.5">
           {(
             [
-              { key: 'serif', label: 'Serif (Sách)' },
-              { key: 'sans', label: 'Sans (GitBook)' },
+              { value: 1.6, label: 'Gọn' },
+              { value: 1.8, label: 'Vừa' },
+              { value: 2.0, label: 'Thoáng' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.value}
+              onClick={() => onUpdateSettings({ lineHeight: item.value })}
+              className={optionButton(settings.lineHeight === item.value)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Font Family */}
+      <div>
+        <div className={sectionLabel}>Kiểu chữ</div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(
+            [
+              { key: 'serif', label: 'Sách' },
+              { key: 'sans', label: 'Hiện đại' },
               { key: 'mono', label: 'Mono' },
             ] as const
           ).map((item) => (
             <button
               key={item.key}
               onClick={() => onUpdateSettings({ fontFamily: item.key })}
-              className={`py-1.5 px-2 text-center rounded text-xs transition-colors border ${
-                settings.fontFamily === item.key
-                  ? 'bg-neutral-900 text-white border-neutral-900 font-medium'
-                  : 'bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
+              className={`${optionButton(settings.fontFamily === item.key)} ${FONT_CLASS[item.key]}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Theme */}
+      <div>
+        <div className={sectionLabel}>Màu nền</div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {(
+            [
+              { key: 'light', label: 'Sáng', preview: 'bg-white text-black border-neutral-300' },
+              { key: 'warm', label: 'Xám', preview: 'bg-neutral-100 text-neutral-800 border-neutral-300' },
+              { key: 'dark', label: 'Tối', preview: 'bg-neutral-900 text-neutral-100 border-neutral-700' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.key}
+              onClick={() => onUpdateSettings({ theme: item.key })}
+              className={`min-h-[40px] rounded-md text-center border text-sm transition-all ${item.preview} ${
+                settings.theme === item.key
+                  ? 'ring-2 ring-neutral-500 font-semibold'
+                  : 'opacity-80 hover:opacity-100'
               }`}
             >
               {item.label}
@@ -73,94 +180,40 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
         </div>
       </div>
 
-      {/* Font Size & Line Height */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between font-semibold text-neutral-500 uppercase tracking-wider text-[10px]">
-          <span>CỠ CHỮ: {settings.fontSize}px</span>
-          <span>GIÃN DÒNG: {settings.lineHeight}x</span>
-        </div>
-        <div className="flex items-center gap-2">
+      {/* Alignment */}
+      <div>
+        <div className={sectionLabel}>Căn lề</div>
+        <div className="grid grid-cols-2 gap-1.5">
           <button
-            onClick={() => onUpdateSettings({ fontSize: Math.max(14, settings.fontSize - 1) })}
-            disabled={settings.fontSize <= 14}
-            className="flex-1 py-1 px-2 text-center rounded border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
+            onClick={() => onUpdateSettings({ textAlign: 'left' })}
+            className={optionButton(settings.textAlign === 'left')}
           >
-            A-
+            Căn trái
           </button>
           <button
-            onClick={() => onUpdateSettings({ fontSize: Math.min(26, settings.fontSize + 1) })}
-            disabled={settings.fontSize >= 26}
-            className="flex-1 py-1 px-2 text-center rounded border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
+            onClick={() => onUpdateSettings({ textAlign: 'justify' })}
+            className={optionButton(settings.textAlign === 'justify')}
           >
-            A+
-          </button>
-
-          <button
-            onClick={() => {
-              const heights = [1.6, 1.8, 2.0];
-              const nextIdx = (heights.indexOf(settings.lineHeight) + 1) % heights.length;
-              onUpdateSettings({ lineHeight: heights[nextIdx] });
-            }}
-            className="py-1 px-2.5 text-center rounded border border-neutral-200 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 font-mono"
-            title="Đổi khoảng cách dòng"
-          >
-            ↕ {settings.lineHeight}
+            Đều hai bên
           </button>
         </div>
       </div>
 
-      {/* Monochrome Tone Themes */}
-      <div className="space-y-1.5">
-        <div className="font-semibold text-neutral-500 uppercase tracking-wider text-[10px]">
-          SẮC ĐỘ GIẤY (MONOCHROME)
-        </div>
-        <div className="grid grid-cols-3 gap-1">
-          {(
-            [
-              { key: 'light', label: 'Trắng tinh', preview: 'bg-white text-black border-neutral-300' },
-              { key: 'warm', label: 'Giấy xám', preview: 'bg-neutral-100 text-neutral-800 border-neutral-300' },
-              { key: 'dark', label: 'Mực đêm', preview: 'bg-neutral-900 text-neutral-100 border-neutral-800' },
-            ] as const
-          ).map((item) => (
-            <button
-              key={item.key}
-              onClick={() => onUpdateSettings({ theme: item.key })}
-              className={`p-1.5 rounded text-center border text-[11px] flex items-center justify-center gap-1 transition-all ${item.preview} ${
-                settings.theme === item.key ? 'ring-2 ring-neutral-400 font-semibold' : 'opacity-80 hover:opacity-100'
-              }`}
-            >
-              <span>{item.label}</span>
-              {settings.theme === item.key && <CheckOutlined className="text-[10px]" />}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Reading Width */}
-      <div className="space-y-1.5">
-        <div className="font-semibold text-neutral-500 uppercase tracking-wider text-[10px]">
-          ĐỘ RỘNG TRANG
-        </div>
-        <div className="grid grid-cols-2 gap-1">
+      {/* Reading Width (chủ yếu hữu ích trên iPad / laptop) */}
+      <div className="hidden md:block">
+        <div className={sectionLabel}>Độ rộng trang</div>
+        <div className="grid grid-cols-2 gap-1.5">
           <button
             onClick={() => onUpdateSettings({ maxWidth: 'normal' })}
-            className={`py-1 px-2 text-center rounded border text-xs ${
-              settings.maxWidth === 'normal'
-                ? 'bg-neutral-900 text-white border-neutral-900'
-                : 'border-neutral-200 text-neutral-700 hover:bg-neutral-100'
-            }`}
+            className={optionButton(settings.maxWidth === 'normal')}
           >
-            Tiêu chuẩn (GitBook)
+            Vừa
           </button>
           <button
             onClick={() => onUpdateSettings({ maxWidth: 'wide' })}
-            className={`py-1 px-2 text-center rounded border text-xs ${
-              settings.maxWidth === 'wide'
-                ? 'bg-neutral-900 text-white border-neutral-900'
-                : 'border-neutral-200 text-neutral-700 hover:bg-neutral-100'
-            }`}
+            className={optionButton(settings.maxWidth === 'wide')}
           >
-            Rộng thoáng
+            Rộng
           </button>
         </div>
       </div>
@@ -168,51 +221,41 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
   );
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-colors">
-      <div className="max-w-7xl mx-auto px-4 h-13 flex items-center justify-between gap-4">
+    <header
+      className={`sticky top-0 z-30 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 transition-[transform,colors] duration-200 ${
+        isHidden && !isSidebarOpen ? '-translate-y-full' : 'translate-y-0'
+      }`}
+    >
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 h-13 flex items-center justify-between gap-2">
         {/* Left: Sidebar toggle & Breadcrumbs */}
-        <div className="flex items-center gap-3 truncate">
-          <button
-            onClick={onToggleSidebar}
-            aria-label="Toggle navigation menu"
-            className="p-1.5 rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-          >
+        <div className="flex items-center gap-1 min-w-0">
+          <button onClick={onToggleSidebar} aria-label="Mở mục lục" className={`${iconButton} shrink-0`}>
             <MenuOutlined className="text-base" />
           </button>
 
-          <nav className="flex items-center gap-1.5 text-xs text-neutral-500 truncate">
-            <span className="truncate max-w-[120px] md:max-w-[200px] font-medium text-neutral-800 dark:text-neutral-200">
-              {currentNovel.title}
-            </span>
-            <span className="text-neutral-300 dark:text-neutral-700">/</span>
-            <span className="truncate max-w-[150px] md:max-w-[280px] text-neutral-500 dark:text-neutral-400">
+          <nav className="flex flex-col min-w-0 leading-tight">
+            <span className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">
               {currentChapter.title}
+            </span>
+            <span className="truncate text-[11px] text-neutral-500 dark:text-neutral-400">
+              {currentNovel.title}
             </span>
           </nav>
         </div>
 
         {/* Right: Controls & Account */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-0.5 shrink-0">
           {/* Scroll progress % */}
-          <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono text-neutral-400">
-            <span>{Math.round(scrollProgress * 100)}%</span>
+          <div className="text-[11px] font-mono text-neutral-500 w-9 text-right mr-1">
+            {Math.round(scrollProgress * 100)}%
           </div>
 
           {/* PWA Install */}
           <PWAInstallButton />
 
           {/* Reading Settings Popover */}
-          <Popover
-            content={settingsContent}
-            trigger="click"
-            placement="bottomRight"
-            arrow={false}
-          >
-            <button
-              aria-label="Cài đặt đọc truyện"
-              className="p-2 rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-              title="Tùy chỉnh font, cỡ chữ & giao diện"
-            >
+          <Popover content={settingsContent} trigger="click" placement="bottomRight" arrow={false}>
+            <button aria-label="Cài đặt đọc truyện" className={iconButton} title="Tùy chỉnh chữ & giao diện">
               <SettingOutlined className="text-base" />
             </button>
           </Popover>
@@ -221,7 +264,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
           <button
             onClick={onToggleZenMode}
             aria-label={isZenMode ? 'Thoát chế độ tập trung' : 'Chế độ tập trung'}
-            className="hidden md:flex p-2 rounded-md text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+            className={`hidden md:flex ${iconButton}`}
             title={isZenMode ? 'Thoát chế độ tập trung' : 'Chế độ tập trung Zen'}
           >
             {isZenMode ? (
@@ -234,7 +277,8 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
           {/* Google Drive Account / Sync button */}
           <button
             onClick={onOpenDriveModal}
-            className="flex items-center gap-1.5 p-1 md:px-2 md:py-1 rounded-md text-xs font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors border border-neutral-200 dark:border-neutral-700"
+            className={`${iconButton} md:w-auto md:px-2 md:gap-1.5 text-xs font-medium`}
+            aria-label="Đồng bộ Google Drive"
             title="Đồng bộ Google Drive"
           >
             {user ? (
@@ -243,10 +287,11 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
                   <img
                     src={user.photoURL}
                     alt={user.displayName || 'Google'}
-                    className="w-5 h-5 rounded-full"
+                    className="w-6 h-6 rounded-full"
+                    referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <div className="w-5 h-5 rounded-full bg-neutral-900 text-white flex items-center justify-center text-[10px]">
+                  <div className="w-6 h-6 rounded-full bg-neutral-900 text-white flex items-center justify-center text-[11px]">
                     {user.email ? user.email.slice(0, 1).toUpperCase() : 'G'}
                   </div>
                 )}
@@ -256,7 +301,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
               </>
             ) : (
               <>
-                <CloudSyncOutlined className="text-sm" />
+                <CloudSyncOutlined className="text-base" />
                 <span className="hidden md:inline">Drive</span>
               </>
             )}

@@ -12,6 +12,71 @@ const MAX_FOLDER_DEPTH = 5;
 // Số thư mục duyệt song song, để không vượt giới hạn rate của Drive API
 const FOLDER_CONCURRENCY = 4;
 
+const CACHE_INDEX_KEY = 'slothful_cache_index';
+
+// Token hết hạn hoặc thiếu quyền: UI cần xin lại token thay vì báo lỗi chung
+export class DriveAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DriveAuthError';
+  }
+}
+
+export interface ScanProgress {
+  done: number;
+  total: number;
+  name: string;
+}
+
+// ---- Cache chương trong localStorage (đọc được cả khi mất token / offline) ----
+
+function readCacheIndex(): string[] {
+  try {
+    const raw = localStorage.getItem(CACHE_INDEX_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCacheIndex(ids: string[]) {
+  try {
+    localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(ids));
+  } catch {
+    // bỏ qua: index chỉ để dọn cache
+  }
+}
+
+export function getCachedChapterText(fileId: string): string | null {
+  try {
+    return localStorage.getItem(`${CACHE_PREFIX}${fileId}`);
+  } catch {
+    return null;
+  }
+}
+
+// Lưu cache; khi đầy bộ nhớ thì xóa các chương cũ nhất rồi thử lại
+function cacheChapterText(fileId: string, text: string) {
+  const key = `${CACHE_PREFIX}${fileId}`;
+  try {
+    localStorage.setItem(key, text);
+  } catch {
+    const index = readCacheIndex();
+    const evicted = index.splice(0, Math.max(20, Math.ceil(index.length * 0.3)));
+    evicted.forEach((id) => localStorage.removeItem(`${CACHE_PREFIX}${id}`));
+    writeCacheIndex(index);
+    try {
+      localStorage.setItem(key, text);
+    } catch (e) {
+      console.warn('LocalStorage full, skipped chapter caching', e);
+      return;
+    }
+  }
+  const index = readCacheIndex().filter((id) => id !== fileId);
+  index.push(fileId);
+  writeCacheIndex(index);
+}
+
 // Natural sort for chapter filenames: extracts numbers and compares cleanly
 export function extractChapterOrder(filename: string): number {
   const match = filename.match(/(?:chương|chap|c|chapter|hồi|bài|tập|phần)?\s*(\d+)/i);
@@ -59,6 +124,9 @@ async function listChildren(parentId: string, accessToken: string): Promise<Driv
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
+    if (response.status === 401) {
+      throw new DriveAuthError('Phiên Google Drive đã hết hạn');
+    }
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Lỗi đọc thư mục Google Drive: ${response.status} - ${errorText}`);
@@ -146,10 +214,16 @@ export async function scanFolderAsNovel(
 }
 
 // Quét các thư mục ở gốc My Drive, mỗi thư mục chứa chương (ở bất kỳ cấp nào) là một bộ truyện
-export async function scanDriveForNovels(accessToken: string): Promise<Novel[]> {
+export async function scanDriveForNovels(
+  accessToken: string,
+  onProgress?: (progress: ScanProgress) => void
+): Promise<Novel[]> {
   const folders = await listDriveFolders(accessToken);
   const detectedNovels: Novel[] = [];
   let firstError: Error | null = null;
+  let done = 0;
+
+  onProgress?.({ done, total: folders.length, name: '' });
 
   for (let i = 0; i < folders.length; i += FOLDER_CONCURRENCY) {
     const batch = folders.slice(i, i + FOLDER_CONCURRENCY);
@@ -161,6 +235,9 @@ export async function scanDriveForNovels(accessToken: string): Promise<Novel[]> 
           console.warn(`Không quét được thư mục "${folder.name}"`, err);
           if (!firstError) firstError = err;
           return null;
+        } finally {
+          done += 1;
+          onProgress?.({ done, total: folders.length, name: folder.name });
         }
       })
     );
@@ -227,8 +304,7 @@ export async function fetchChapterText(
   accessToken: string,
   mimeType?: string
 ): Promise<string> {
-  const cacheKey = `${CACHE_PREFIX}${fileId}`;
-  const cached = localStorage.getItem(cacheKey);
+  const cached = getCachedChapterText(fileId);
   if (cached) {
     return cached;
   }
@@ -236,28 +312,40 @@ export async function fetchChapterText(
   const headers = { Authorization: `Bearer ${accessToken}` };
   let text: string;
 
+  const checkResponse = (response: Response) => {
+    if (response.status === 401) throw new DriveAuthError('Phiên Google Drive đã hết hạn');
+    if (!response.ok) {
+      throw new Error(`Không thể tải nội dung chương (HTTP ${response.status})`);
+    }
+  };
+
   if (mimeType === MIME_GDOC) {
     // Google Docs không tải trực tiếp được, phải export
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`;
     const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error(`Không thể tải nội dung chương (HTTP ${response.status})`);
-    }
+    checkResponse(response);
     text = await response.text();
   } else {
     const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
     const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error(`Không thể tải nội dung chương (HTTP ${response.status})`);
-    }
+    checkResponse(response);
     text = mimeType === MIME_DOCX ? docxToText(await response.arrayBuffer()) : await response.text();
   }
 
-  try {
-    localStorage.setItem(cacheKey, text);
-  } catch (e) {
-    console.warn('LocalStorage full, skipped chapter caching', e);
-  }
-
+  cacheChapterText(fileId, text);
   return text;
+}
+
+// Tải trước chương kế tiếp vào cache để sang chương không phải chờ. Lỗi thì bỏ qua.
+export async function prefetchChapterText(
+  fileId: string,
+  accessToken: string,
+  mimeType?: string
+): Promise<void> {
+  if (getCachedChapterText(fileId)) return;
+  try {
+    await fetchChapterText(fileId, accessToken, mimeType);
+  } catch {
+    // không sao: sẽ tải lại khi người đọc thật sự mở chương
+  }
 }

@@ -1,13 +1,29 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Novel, Chapter, ReadingSettings, ReadingHistoryItem } from './types/novel';
-import { BUILTIN_NOVELS } from './data/builtinNovels';
 import { GitBookSidebar } from './components/GitBookSidebar';
 import { ReaderHeader } from './components/ReaderHeader';
-import { ReaderCanvas } from './components/ReaderCanvas';
+import { ReaderCanvas, ContentStatus } from './components/ReaderCanvas';
 import { DriveFolderPickerModal } from './components/DriveFolderPickerModal';
+import { LibraryModal, NovelResume } from './components/LibraryModal';
+import { EmptyLibrary } from './components/EmptyLibrary';
 import { useOverscrollNavigation } from './hooks/useOverscrollNavigation';
-import { initAuth, googleSignIn, logout as authLogout, getAccessToken, GoogleUser } from './services/googleAuth';
-import { fetchChapterText, scanDriveForNovels } from './services/googleDrive';
+import {
+  initAuth,
+  googleSignIn,
+  logout as authLogout,
+  getAccessToken,
+  peekAccessToken,
+  refreshAccessToken,
+  GoogleUser,
+} from './services/googleAuth';
+import {
+  fetchChapterText,
+  prefetchChapterText,
+  getCachedChapterText,
+  scanDriveForNovels,
+  DriveAuthError,
+  ScanProgress,
+} from './services/googleDrive';
 import { message } from 'antd';
 
 const STORAGE_KEY_SETTINGS = 'slothful_reading_settings';
@@ -15,24 +31,40 @@ const STORAGE_KEY_LAST_READ = 'slothful_last_read';
 const STORAGE_KEY_HISTORY = 'slothful_reading_history';
 const STORAGE_KEY_DRIVE_NOVELS = 'slothful_drive_novels_cache';
 
-const DEFAULT_SETTINGS: ReadingSettings = {
+// Chưa từng chỉnh gì thì theo giao diện sáng/tối của thiết bị
+const buildDefaultSettings = (): ReadingSettings => ({
   fontSize: 18,
   lineHeight: 1.8,
   fontFamily: 'serif',
-  theme: 'light',
+  theme:
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light',
   textAlign: 'left',
   maxWidth: 'normal',
+});
+
+interface ContentState {
+  chapterId: string | null;
+  status: ContentStatus;
+  text: string | null;
+  error: string;
+}
+
+const readJson = <T,>(key: string, fallback: T): T => {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) return JSON.parse(saved) as T;
+  } catch {}
+  return fallback;
 };
 
 export default function App() {
   // --- Reading Settings ---
-  const [settings, setSettings] = useState<ReadingSettings>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-      if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
-    } catch {}
-    return DEFAULT_SETTINGS;
-  });
+  const [settings, setSettings] = useState<ReadingSettings>(() => ({
+    ...buildDefaultSettings(),
+    ...readJson<Partial<ReadingSettings>>(STORAGE_KEY_SETTINGS, {}),
+  }));
 
   // Sync dark class on documentElement
   useEffect(() => {
@@ -44,85 +76,107 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
   }, [settings]);
 
-  // --- Novels & Chapters State ---
+  // --- Novels & Chapters State (nguồn duy nhất là Google Drive) ---
   const [driveNovels, setDriveNovels] = useState<Novel[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_DRIVE_NOVELS);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return [];
+    const saved = readJson<Novel[]>(STORAGE_KEY_DRIVE_NOVELS, []);
+    return Array.isArray(saved)
+      ? saved.filter((n) => n && n.source === 'drive' && Array.isArray(n.chapters))
+      : [];
   });
+  const allNovels = driveNovels;
 
-  const allNovels = useMemo(() => {
-    return [...driveNovels, ...BUILTIN_NOVELS];
-  }, [driveNovels]);
+  const [currentNovelId, setCurrentNovelId] = useState<string | null>(
+    () => readJson<{ novelId?: string }>(STORAGE_KEY_LAST_READ, {}).novelId ?? null
+  );
+  const [currentChapterId, setCurrentChapterId] = useState<string | null>(
+    () => readJson<{ chapterId?: string }>(STORAGE_KEY_LAST_READ, {}).chapterId ?? null
+  );
 
-  // Selected Novel & Chapter
-  const [currentNovelId, setCurrentNovelId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_LAST_READ);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.novelId) return parsed.novelId;
-      }
-    } catch {}
-    return BUILTIN_NOVELS[0].id;
-  });
-
-  const currentNovel = useMemo(() => {
-    return allNovels.find((n) => n.id === currentNovelId) || allNovels[0];
+  const currentNovel = useMemo<Novel | null>(() => {
+    return allNovels.find((n) => n.id === currentNovelId) || allNovels[0] || null;
   }, [allNovels, currentNovelId]);
 
-  const [currentChapterId, setCurrentChapterId] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_LAST_READ);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.chapterId) return parsed.chapterId;
-      }
-    } catch {}
-    return BUILTIN_NOVELS[0].chapters[0]?.id || '';
-  });
-
-  const currentChapter = useMemo(() => {
-    const found = currentNovel.chapters.find((c) => c.id === currentChapterId);
-    return found || currentNovel.chapters[0] || { id: 'empty', title: 'Chưa có chương', order: 1, source: 'builtin' };
+  const currentChapter = useMemo<Chapter | null>(() => {
+    if (!currentNovel) return null;
+    return (
+      currentNovel.chapters.find((c) => c.id === currentChapterId) || currentNovel.chapters[0] || null
+    );
   }, [currentNovel, currentChapterId]);
 
   // Navigation indexes
   const currentChapterIndex = useMemo(() => {
+    if (!currentNovel || !currentChapter) return -1;
     return currentNovel.chapters.findIndex((c) => c.id === currentChapter.id);
   }, [currentNovel, currentChapter]);
 
-  const hasNext = currentChapterIndex >= 0 && currentChapterIndex < currentNovel.chapters.length - 1;
+  const hasNext =
+    !!currentNovel && currentChapterIndex >= 0 && currentChapterIndex < currentNovel.chapters.length - 1;
   const hasPrev = currentChapterIndex > 0;
 
-  const nextChapter = hasNext ? currentNovel.chapters[currentChapterIndex + 1] : undefined;
-  const prevChapter = hasPrev ? currentNovel.chapters[currentChapterIndex - 1] : undefined;
-
-  // Chapter content
-  const [content, setContent] = useState<string | null>(null);
-  const [isLoadingContent, setIsLoadingContent] = useState(false);
+  const nextChapter = hasNext && currentNovel ? currentNovel.chapters[currentChapterIndex + 1] : undefined;
+  const prevChapter = hasPrev && currentNovel ? currentNovel.chapters[currentChapterIndex - 1] : undefined;
 
   // --- Auth & Google Drive State ---
   const [user, setUser] = useState<GoogleUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
   // UI state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isZenMode, setIsZenMode] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
 
-  // Reading history store
-  const [readingHistory, setReadingHistory] = useState<Record<string, ReadingHistoryItem>>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_HISTORY);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return {};
+  // Reading history store (tiến độ từng chương: vị trí cuộn + lần đọc gần nhất)
+  const [readingHistory, setReadingHistory] = useState<Record<string, ReadingHistoryItem>>(() =>
+    readJson<Record<string, ReadingHistoryItem>>(STORAGE_KEY_HISTORY, {})
+  );
+
+  // Refs cho các listener chạy một lần nhưng cần giá trị mới nhất
+  const historyRef = useRef(readingHistory);
+  historyRef.current = readingHistory;
+  const currentNovelRef = useRef(currentNovel);
+  currentNovelRef.current = currentNovel;
+  const currentChapterRef = useRef(currentChapter);
+  currentChapterRef.current = currentChapter;
+
+  // Chương đang đọc dở của một bộ truyện (dùng cho "Đọc tiếp")
+  const getResume = useCallback(
+    (novel: Novel): NovelResume | null => {
+      if (novel.chapters.length === 0) return null;
+      let best: ReadingHistoryItem | null = null;
+      for (const item of Object.values(readingHistory)) {
+        if (item.novelId === novel.id && (!best || item.updatedAt > best.updatedAt)) best = item;
+      }
+      if (best) {
+        const index = novel.chapters.findIndex((c) => c.id === best!.chapterId);
+        if (index >= 0) return { chapter: novel.chapters[index], index, updatedAt: best.updatedAt };
+      }
+      return { chapter: novel.chapters[0], index: 0, updatedAt: 0 };
+    },
+    [readingHistory]
+  );
+
+  // --- Nội dung chương ---
+  const [contentState, setContentState] = useState<ContentState>({
+    chapterId: null,
+    status: 'idle',
+    text: null,
+    error: '',
   });
+  const [reloadKey, setReloadKey] = useState(0);
+  const contentStateRef = useRef(contentState);
+  contentStateRef.current = contentState;
+
+  // Trạng thái hiển thị: nếu nội dung đang giữ chưa phải của chương hiện tại thì coi như đang tải
+  const viewStatus: ContentStatus = !currentChapter
+    ? 'idle'
+    : contentState.chapterId === currentChapter.id
+    ? contentState.status
+    : 'loading';
 
   // Init Auth
   useEffect(() => {
@@ -140,24 +194,72 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const handleNovelsSynced = (newNovels: Novel[], opts?: { select?: boolean }) => {
+    setDriveNovels((prev) => {
+      // Merge by ID
+      const map = new Map<string, Novel>();
+      prev.forEach((n) => map.set(n.id, n));
+      newNovels.forEach((n) => map.set(n.id, n));
+      const merged = Array.from(map.values());
+      localStorage.setItem(STORAGE_KEY_DRIVE_NOVELS, JSON.stringify(merged));
+      return merged;
+    });
+
+    // Chỉ nhảy sang truyện mới khi chưa có truyện nào hoặc người dùng chủ động chọn
+    if (newNovels.length > 0 && (opts?.select || !currentNovel)) {
+      startNovel(newNovels[0]);
+    }
+  };
+
+  // Mở một bộ truyện ở đúng chương đang đọc dở
+  const startNovel = (novel: Novel) => {
+    pendingEndRef.current = false;
+    const resume = getResume(novel);
+    setCurrentNovelId(novel.id);
+    setCurrentChapterId(resume ? resume.chapter.id : null);
+  };
+
+  const handleRemoveNovel = (novel: Novel) => {
+    setDriveNovels((prev) => {
+      const next = prev.filter((n) => n.id !== novel.id);
+      localStorage.setItem(STORAGE_KEY_DRIVE_NOVELS, JSON.stringify(next));
+      return next;
+    });
+    if (currentNovel?.id === novel.id) {
+      const other = allNovels.find((n) => n.id !== novel.id);
+      if (other) {
+        startNovel(other);
+      } else {
+        setCurrentNovelId(null);
+        setCurrentChapterId(null);
+      }
+    }
+  };
+
   const handleLogin = async () => {
     setIsLoggingIn(true);
     try {
       const res = await googleSignIn();
-      if (res) {
-        setUser(res.user);
-        setAccessToken(res.accessToken);
-        message.success(`Đã kết nối tài khoản Google: ${res.user.displayName || res.user.email}`);
+      setUser(res.user);
+      setAccessToken(res.accessToken);
+      message.success(`Đã kết nối tài khoản Google: ${res.user.displayName || res.user.email}`);
 
-        // Scan novels automatically
+      // Lần đầu (chưa có truyện nào) thì tự quét Drive luôn
+      if (driveNovels.length === 0) {
         try {
-          const detected = await scanDriveForNovels(res.accessToken);
+          setScanProgress({ done: 0, total: 0, name: '' });
+          const detected = await scanDriveForNovels(res.accessToken, setScanProgress);
           if (detected.length > 0) {
             handleNovelsSynced(detected);
-            message.success(`Đã tự động nhận diện ${detected.length} bộ truyện từ Drive`);
+            message.success(`Đã tìm thấy ${detected.length} bộ truyện trên Drive`);
+          } else {
+            message.info('Chưa tìm thấy bộ truyện nào ở gốc Google Drive');
           }
-        } catch (scanErr) {
-          console.warn('Auto scan on login skipped', scanErr);
+        } catch (scanErr: any) {
+          console.warn('Auto scan on login failed', scanErr);
+          message.error(scanErr.message || 'Không quét được Google Drive');
+        } finally {
+          setScanProgress(null);
         }
       }
     } catch (err: any) {
@@ -179,159 +281,278 @@ export default function App() {
     }
   };
 
-  const handleNovelsSynced = (newNovels: Novel[]) => {
-    setDriveNovels((prev) => {
-      // Merge by ID
-      const map = new Map<string, Novel>();
-      prev.forEach((n) => map.set(n.id, n));
-      newNovels.forEach((n) => map.set(n.id, n));
-      const merged = Array.from(map.values());
-      localStorage.setItem(STORAGE_KEY_DRIVE_NOVELS, JSON.stringify(merged));
-      return merged;
-    });
-
-    if (newNovels.length > 0) {
-      // Switch to first newly synced novel
-      setCurrentNovelId(newNovels[0].id);
-      if (newNovels[0].chapters[0]) {
-        setCurrentChapterId(newNovels[0].chapters[0].id);
-      }
-    }
-  };
-
   // Load Chapter Content
   useEffect(() => {
-    let isCancelled = false;
+    if (!currentChapter) return;
+    const chapter = currentChapter;
+    // Chương này đã tải xong rồi (vd chỉ đổi token) thì không tải lại
+    const current = contentStateRef.current;
+    if (current.chapterId === chapter.id && current.status === 'ready') return;
 
-    const loadChapter = async () => {
-      if (!currentChapter) {
-        setContent(null);
+    let cancelled = false;
+
+    const setState = (status: ContentStatus, text: string | null = null, error = '') => {
+      if (cancelled) return;
+      setContentState({ chapterId: chapter.id, status, text, error });
+    };
+
+    const finish = (text: string) => {
+      if (cancelled) return;
+      setState('ready', text);
+    };
+
+    const run = async () => {
+      if (!chapter.fileId) {
+        finish(chapter.content ?? '');
         return;
       }
 
-      if (currentChapter.source === 'builtin') {
-        setContent(currentChapter.content || '');
-        setIsLoadingContent(false);
+      // Đã có trong cache thì đọc luôn, không cần token (đọc được cả khi mất kết nối Drive)
+      const cached = getCachedChapterText(chapter.fileId);
+      if (cached) {
+        finish(cached);
         return;
       }
 
-      // From Drive
-      if (currentChapter.fileId) {
-        setIsLoadingContent(true);
+      setState('loading');
+      try {
+        const token = await getAccessToken();
+        if (!token) {
+          setState('needs-auth');
+          return;
+        }
+
+        let text: string;
         try {
-          const token = accessToken || (await getAccessToken());
-          if (!token) {
-            setContent(
-              '⚠️ Bạn cần kết nối tài khoản Google Drive để tải nội dung chương này. Hãy bấm "Drive" trên thanh điều hướng để đăng nhập!'
-            );
-            setIsLoadingContent(false);
+          text = await fetchChapterText(chapter.fileId, token, chapter.mimeType);
+        } catch (err) {
+          if (!(err instanceof DriveAuthError)) throw err;
+          // Token hết hạn giữa chừng: xin token mới rồi thử lại một lần
+          const fresh = await refreshAccessToken();
+          if (!fresh) {
+            setState('needs-auth');
             return;
           }
-
-          const text = await fetchChapterText(currentChapter.fileId, token, currentChapter.mimeType);
-          if (!isCancelled) {
-            setContent(text);
-          }
-        } catch (err: any) {
-          if (!isCancelled) {
-            setContent(`❌ Lỗi tải chương từ Google Drive: ${err.message || 'Vui lòng thử lại sau.'}`);
-          }
-        } finally {
-          if (!isCancelled) setIsLoadingContent(false);
+          text = await fetchChapterText(chapter.fileId, fresh, chapter.mimeType);
         }
+        finish(text);
+      } catch (err: any) {
+        if (err instanceof DriveAuthError) setState('needs-auth');
+        else setState('error', null, err?.message || '');
       }
     };
 
-    loadChapter();
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentChapter?.id, reloadKey, accessToken]);
 
-    // Save last read state
-    const lastReadData = { novelId: currentNovel.id, chapterId: currentChapter.id };
-    localStorage.setItem(STORAGE_KEY_LAST_READ, JSON.stringify(lastReadData));
+  const handleRetryContent = () => {
+    setReloadKey((k) => k + 1);
+  };
 
-    // Update history
-    const historyKey = `${currentNovel.id}_${currentChapter.id}`;
+  // Tải trước chương kế tiếp để sang chương không phải chờ
+  useEffect(() => {
+    if (viewStatus !== 'ready' || !nextChapter?.fileId) return;
+    const next = nextChapter;
+    const timer = setTimeout(() => {
+      const token = peekAccessToken();
+      if (token && next.fileId) prefetchChapterText(next.fileId, token, next.mimeType);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [viewStatus, nextChapter?.id]);
+
+  // Ghi nhớ chương đang đọc + đánh dấu đã mở (giữ nguyên vị trí cuộn đã lưu)
+  useEffect(() => {
+    if (!currentNovel || !currentChapter) return;
+    localStorage.setItem(
+      STORAGE_KEY_LAST_READ,
+      JSON.stringify({ novelId: currentNovel.id, chapterId: currentChapter.id })
+    );
+
+    const novelId = currentNovel.id;
+    const chapterId = currentChapter.id;
+    const key = `${novelId}_${chapterId}`;
     setReadingHistory((prev) => {
       const updated = {
         ...prev,
-        [historyKey]: {
-          novelId: currentNovel.id,
-          chapterId: currentChapter.id,
-          scrollRatio: 0,
+        [key]: {
+          novelId,
+          chapterId,
+          scrollRatio: prev[key]?.scrollRatio ?? 0,
           updatedAt: Date.now(),
         },
       };
       localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
       return updated;
     });
+  }, [currentNovel?.id, currentChapter?.id]);
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [currentNovel.id, currentChapter.id, accessToken]);
+  // Khôi phục vị trí đọc khi nội dung chương đã sẵn sàng
+  const restoreStartedRef = useRef<string | null>(null);
+  const restoredRef = useRef<string | null>(null);
+  const pendingEndRef = useRef(false); // vừa lùi về chương trước bằng cuộn: hạ cánh ở cuối chương
+  const lastYRef = useRef(0);
 
-  // Track scroll progress
   useEffect(() => {
+    if (viewStatus !== 'ready' || !currentNovel || !currentChapter) return;
+    if (restoreStartedRef.current === currentChapter.id) return;
+    restoreStartedRef.current = currentChapter.id;
+
+    const chapterId = currentChapter.id;
+    const saved = historyRef.current[`${currentNovel.id}_${chapterId}`]?.scrollRatio ?? 0;
+    const goEnd = pendingEndRef.current;
+    pendingEndRef.current = false;
+
+    // Đợi trình duyệt dựng xong nội dung rồi mới cuộn
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const total = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        let top = 0;
+        if (goEnd) top = total;
+        else if (saved > 0.02 && saved < 0.98) top = total * saved;
+
+        window.scrollTo({ top, behavior: 'auto' });
+        lastYRef.current = top;
+        restoredRef.current = chapterId;
+        setScrollProgress(total <= 0 ? 1 : top / total);
+        setIsHeaderHidden(false);
+      })
+    );
+  }, [viewStatus, currentChapter?.id, currentNovel?.id]);
+
+  // Theo dõi cuộn: tiến độ, ẩn/hiện header, lưu vị trí đọc
+  useEffect(() => {
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
     const handleScroll = () => {
-      const totalScroll = document.documentElement.scrollHeight - window.innerHeight;
-      if (totalScroll <= 0) {
-        setScrollProgress(1);
-        return;
-      }
-      const currentScroll = window.scrollY;
-      const progress = Math.min(1, Math.max(0, currentScroll / totalScroll));
+      const y = window.scrollY;
+      const total = document.documentElement.scrollHeight - window.innerHeight;
+      const progress = total <= 0 ? 1 : Math.min(1, Math.max(0, y / total));
       setScrollProgress(progress);
+
+      // Cuộn xuống thì ẩn header cho rộng chỗ đọc, cuộn lên thì hiện lại
+      if (y < 80) {
+        setIsHeaderHidden(false);
+        lastYRef.current = y;
+      } else {
+        const dy = y - lastYRef.current;
+        if (dy > 8) {
+          setIsHeaderHidden(true);
+          lastYRef.current = y;
+        } else if (dy < -8) {
+          setIsHeaderHidden(false);
+          lastYRef.current = y;
+        }
+      }
+
+      const novel = currentNovelRef.current;
+      const chapter = currentChapterRef.current;
+      // Chưa khôi phục xong vị trí thì không ghi, tránh ghi đè bằng vị trí tạm
+      if (!novel || !chapter || restoredRef.current !== chapter.id) return;
+
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const key = `${novel.id}_${chapter.id}`;
+        setReadingHistory((prev) => {
+          const updated = {
+            ...prev,
+            [key]: { novelId: novel.id, chapterId: chapter.id, scrollRatio: progress, updatedAt: Date.now() },
+          };
+          localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
+          return updated;
+        });
+      }, 500);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (saveTimer) clearTimeout(saveTimer);
+    };
   }, []);
 
-  // Chapter Navigation Handlers
+  // Chapter Navigation Handlers (vị trí cuộn do effect khôi phục ở trên lo)
   const handleNextChapter = useCallback(() => {
-    if (hasNext && nextChapter) {
-      setCurrentChapterId(nextChapter.id);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    pendingEndRef.current = false;
+    if (hasNext && nextChapter) setCurrentChapterId(nextChapter.id);
   }, [hasNext, nextChapter]);
 
   const handlePrevChapter = useCallback(() => {
-    if (hasPrev && prevChapter) {
-      setCurrentChapterId(prevChapter.id);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    pendingEndRef.current = false;
+    if (hasPrev && prevChapter) setCurrentChapterId(prevChapter.id);
   }, [hasPrev, prevChapter]);
 
+  // Kéo xuống ở đầu chương để về chương trước: hạ cánh ở cuối chương đó (đọc ngược cho tự nhiên)
+  const handlePrevFromOverscroll = useCallback(() => {
+    handlePrevChapter();
+    pendingEndRef.current = true;
+  }, [handlePrevChapter]);
+
   // Overscroll Navigation hook (scroll past bottom -> next; scroll past top -> prev)
-  const {
-    overscrollBottom,
-    overscrollTop,
-    bottomProgress,
-    topProgress,
-    isNavigating,
-  } = useOverscrollNavigation({
+  // Chỉ bật khi chương đã tải xong, tránh nhảy chương nhầm lúc trang còn trống
+  const { bottomProgress, topProgress, isNavigating } = useOverscrollNavigation({
     onNext: handleNextChapter,
-    onPrev: handlePrevChapter,
-    hasNext,
-    hasPrev,
+    onPrev: handlePrevFromOverscroll,
+    hasNext: hasNext && viewStatus === 'ready',
+    hasPrev: hasPrev && viewStatus === 'ready',
     threshold: 80,
   });
 
-  const handleSelectNovel = (novel: Novel) => {
-    setCurrentNovelId(novel.id);
-    if (novel.chapters.length > 0) {
-      setCurrentChapterId(novel.chapters[0].id);
-    }
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  // Phím tắt ←/→ để chuyển chương (iPad / laptop có bàn phím)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (isDriveModalOpen || isLibraryOpen) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'ArrowRight') handleNextChapter();
+      else if (e.key === 'ArrowLeft') handlePrevChapter();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleNextChapter, handlePrevChapter, isDriveModalOpen, isLibraryOpen]);
 
   const handleSelectChapter = (chapter: Chapter) => {
+    pendingEndRef.current = false;
     setCurrentChapterId(chapter.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const updateSettings = (newSettings: Partial<ReadingSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
   };
+
+  const driveModal = (
+    <DriveFolderPickerModal
+      open={isDriveModalOpen}
+      onClose={() => setIsDriveModalOpen(false)}
+      user={user}
+      accessToken={accessToken}
+      onLogin={handleLogin}
+      onLogout={handleLogout}
+      onNovelsSynced={handleNovelsSynced}
+      isLoggingIn={isLoggingIn}
+    />
+  );
+
+  // Chưa có truyện nào: dẫn thẳng tới kết nối Drive
+  if (!currentNovel || !currentChapter) {
+    return (
+      <>
+        <EmptyLibrary
+          user={user}
+          isLoggingIn={isLoggingIn}
+          scanProgress={scanProgress}
+          onLogin={handleLogin}
+          onOpenDriveModal={() => setIsDriveModalOpen(true)}
+        />
+        {driveModal}
+      </>
+    );
+  }
 
   return (
     <div
@@ -349,8 +570,8 @@ export default function App() {
           novels={allNovels}
           currentNovel={currentNovel}
           currentChapter={currentChapter}
-          onSelectNovel={handleSelectNovel}
           onSelectChapter={handleSelectChapter}
+          onOpenLibrary={() => setIsLibraryOpen(true)}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           onOpenDriveModal={() => setIsDriveModalOpen(true)}
@@ -378,14 +599,18 @@ export default function App() {
           scrollProgress={scrollProgress}
           isZenMode={isZenMode}
           onToggleZenMode={() => setIsZenMode((prev) => !prev)}
+          isHidden={isHeaderHidden}
         />
 
         {/* Reading Canvas */}
         <ReaderCanvas
           currentNovel={currentNovel}
           currentChapter={currentChapter}
-          chapterContent={content}
-          isLoadingContent={isLoadingContent}
+          chapterContent={viewStatus === 'ready' ? contentState.text : null}
+          status={viewStatus}
+          errorMessage={contentState.error}
+          onReconnect={handleLogin}
+          onRetry={handleRetryContent}
           settings={settings}
           onNextChapter={handleNextChapter}
           onPrevChapter={handlePrevChapter}
@@ -399,17 +624,20 @@ export default function App() {
         />
       </div>
 
-      {/* Google Drive Integration Modal */}
-      <DriveFolderPickerModal
-        open={isDriveModalOpen}
-        onClose={() => setIsDriveModalOpen(false)}
-        user={user}
-        accessToken={accessToken}
-        onLogin={handleLogin}
-        onLogout={handleLogout}
-        onNovelsSynced={handleNovelsSynced}
-        isLoggingIn={isLoggingIn}
+      {/* Tủ truyện: đổi truyện, xem tiến độ, "đọc tiếp" */}
+      <LibraryModal
+        open={isLibraryOpen}
+        onClose={() => setIsLibraryOpen(false)}
+        novels={allNovels}
+        currentNovelId={currentNovel.id}
+        getResume={getResume}
+        onSelectNovel={startNovel}
+        onRemoveNovel={handleRemoveNovel}
+        onOpenDriveModal={() => setIsDriveModalOpen(true)}
       />
+
+      {/* Google Drive Integration Modal */}
+      {driveModal}
     </div>
   );
 }

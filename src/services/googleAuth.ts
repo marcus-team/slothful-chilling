@@ -177,6 +177,17 @@ export const getAccessToken = async (): Promise<string | null> => {
   }
 };
 
+// Token đang còn hạn trong bộ nhớ, không bao giờ mở popup (dùng cho việc chạy nền như tải trước chương)
+export const peekAccessToken = (): string | null =>
+  cachedAccessToken && Date.now() < tokenExpiresAt ? cachedAccessToken : null;
+
+// Bỏ token cũ (vd Drive trả 401) và xin token mới
+export const refreshAccessToken = async (): Promise<string | null> => {
+  cachedAccessToken = null;
+  tokenExpiresAt = 0;
+  return getAccessToken();
+};
+
 export const logout = async (): Promise<void> => {
   const token = cachedAccessToken;
   cachedAccessToken = null;

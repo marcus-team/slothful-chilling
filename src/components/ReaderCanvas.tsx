@@ -9,13 +9,18 @@ import {
   ClockCircleOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
-import { Spin } from 'antd';
+import { Button, Spin } from 'antd';
+
+export type ContentStatus = 'idle' | 'loading' | 'ready' | 'needs-auth' | 'error';
 
 interface ReaderCanvasProps {
   currentNovel: Novel;
   currentChapter: Chapter;
   chapterContent: string | null;
-  isLoadingContent: boolean;
+  status: ContentStatus;
+  errorMessage: string;
+  onReconnect: () => void;
+  onRetry: () => void;
   settings: ReadingSettings;
   onNextChapter: () => void;
   onPrevChapter: () => void;
@@ -32,7 +37,10 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
   currentNovel,
   currentChapter,
   chapterContent,
-  isLoadingContent,
+  status,
+  errorMessage,
+  onReconnect,
+  onRetry,
   settings,
   onNextChapter,
   onPrevChapter,
@@ -144,10 +152,32 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
         </header>
 
         {/* Content body */}
-        {isLoadingContent ? (
+        {status === 'loading' || status === 'idle' ? (
           <div className="py-24 text-center space-y-3">
-            <Spin indicator={<LoadingOutlined style={{ fontSize: 28, color: '#111' }} spin />} />
-            <p className="text-sm text-neutral-500">Đang tải nội dung chương từ Google Drive...</p>
+            <Spin
+              indicator={
+                <LoadingOutlined className="text-neutral-900 dark:text-neutral-100" style={{ fontSize: 28 }} spin />
+              }
+            />
+            <p className="text-sm text-neutral-500">Đang tải chương từ Google Drive...</p>
+          </div>
+        ) : status === 'needs-auth' ? (
+          <div className="py-20 text-center space-y-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-xs mx-auto leading-relaxed">
+              Chương này lưu trên Google Drive. Kết nối lại để tiếp tục đọc từ chỗ bạn đang dừng.
+            </p>
+            <Button type="primary" size="large" onClick={onReconnect} className="h-12 px-6">
+              Kết nối lại Google Drive
+            </Button>
+          </div>
+        ) : status === 'error' ? (
+          <div className="py-20 text-center space-y-4">
+            <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-sm mx-auto leading-relaxed break-words">
+              Không tải được chương này. {errorMessage}
+            </p>
+            <Button size="large" onClick={onRetry} className="h-12 px-6">
+              Thử lại
+            </Button>
           </div>
         ) : paragraphs.length === 0 ? (
           <div className="py-16 text-center text-sm text-neutral-400">

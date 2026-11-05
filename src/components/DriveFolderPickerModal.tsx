@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Input, Button, List, Spin, message, Empty, Tooltip } from 'antd';
+import { Modal, Input, Button, Progress, Spin, message, Empty } from 'antd';
 import {
   FolderOutlined,
   SyncOutlined,
@@ -10,7 +10,13 @@ import {
   DisconnectOutlined,
 } from '@ant-design/icons';
 import { Novel } from '../types/novel';
-import { listDriveFolders, scanDriveForNovels, scanFolderAsNovel, DriveFolderItem } from '../services/googleDrive';
+import {
+  listDriveFolders,
+  scanDriveForNovels,
+  scanFolderAsNovel,
+  DriveFolderItem,
+  ScanProgress,
+} from '../services/googleDrive';
 import { GoogleUser } from '../services/googleAuth';
 
 interface DriveFolderPickerModalProps {
@@ -20,7 +26,7 @@ interface DriveFolderPickerModalProps {
   accessToken: string | null;
   onLogin: () => Promise<void>;
   onLogout: () => Promise<void>;
-  onNovelsSynced: (newNovels: Novel[]) => void;
+  onNovelsSynced: (newNovels: Novel[], opts?: { select?: boolean }) => void;
   isLoggingIn: boolean;
 }
 
@@ -39,6 +45,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
   const [isScanning, setIsScanning] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [syncedCount, setSyncedCount] = useState<number | null>(null);
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
   // Load folders when opened and user is authenticated
   useEffect(() => {
@@ -70,7 +77,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
     setIsScanning(true);
     setSyncedCount(null);
     try {
-      const detected = await scanDriveForNovels(accessToken);
+      const detected = await scanDriveForNovels(accessToken, setScanProgress);
       if (detected.length === 0) {
         message.info(
           'Chưa tìm thấy thư mục truyện chứa file .txt, .md hoặc .docx ở gốc Drive. Hãy tạo thư mục chứa các file chương truyện!'
@@ -85,6 +92,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
       message.error(err.message || 'Lỗi khi quét Google Drive');
     } finally {
       setIsScanning(false);
+      setScanProgress(null);
     }
   };
 
@@ -97,7 +105,8 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
         message.info('Không tìm thấy file .txt, .md hoặc .docx trong thư mục này');
       } else {
         message.success(`Đã thêm bộ truyện "${novel.title}" (${novel.chapters.length} chương)!`);
-        onNovelsSynced([novel]);
+        onNovelsSynced([novel], { select: true });
+        onClose();
       }
     } catch (err: any) {
       console.error(err);
@@ -201,28 +210,48 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
 
         {/* Action button */}
         {user && (
-          <div className="flex items-center gap-2">
-            <Button
-              type="primary"
-              icon={<SyncOutlined spin={isScanning} />}
-              loading={isScanning}
-              onClick={handleScanAll}
-              className="bg-neutral-900 hover:bg-neutral-800 text-white"
-            >
-              Quét toàn bộ truyện trên Google Drive
-            </Button>
-            <Button
-              icon={<SyncOutlined spin={isLoadingFolders} />}
-              onClick={loadFolders}
-              disabled={isLoadingFolders || isScanning}
-            >
-              Làm mới danh sách
-            </Button>
-            {syncedCount !== null && (
-              <span className="text-xs text-neutral-500 flex items-center gap-1">
-                <CheckCircleOutlined className="text-emerald-500" />
-                Đã nhận diện {syncedCount} bộ truyện
-              </span>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="primary"
+                size="large"
+                icon={<SyncOutlined spin={isScanning} />}
+                loading={isScanning}
+                onClick={handleScanAll}
+                className="bg-neutral-900 hover:bg-neutral-800 text-white"
+              >
+                Quét toàn bộ truyện trên Google Drive
+              </Button>
+              <Button
+                size="large"
+                icon={<SyncOutlined spin={isLoadingFolders} />}
+                onClick={loadFolders}
+                disabled={isLoadingFolders || isScanning}
+              >
+                Làm mới danh sách
+              </Button>
+              {syncedCount !== null && !isScanning && (
+                <span className="text-xs text-neutral-500 flex items-center gap-1">
+                  <CheckCircleOutlined className="text-emerald-500" />
+                  Đã nhận diện {syncedCount} bộ truyện
+                </span>
+              )}
+            </div>
+
+            {/* Tiến độ quét: biết app đang làm gì, không phải ngồi đoán */}
+            {isScanning && scanProgress && scanProgress.total > 0 && (
+              <div className="space-y-1">
+                <Progress
+                  percent={Math.round((scanProgress.done / scanProgress.total) * 100)}
+                  showInfo={false}
+                  strokeColor="#111"
+                  size="small"
+                />
+                <p className="text-xs text-neutral-500 truncate m-0">
+                  Đang quét {scanProgress.done}/{scanProgress.total} thư mục
+                  {scanProgress.name ? ` · ${scanProgress.name}` : ''}
+                </p>
+              </div>
             )}
           </div>
         )}
@@ -261,7 +290,7 @@ export const DriveFolderPickerModal: React.FC<DriveFolderPickerModalProps> = ({
                 filteredFolders.map((folder) => (
                   <div
                     key={folder.id}
-                    className="p-2.5 hover:bg-neutral-100/70 dark:hover:bg-neutral-800/50 flex items-center justify-between transition-colors text-sm"
+                    className="p-2.5 min-h-[48px] hover:bg-neutral-100/70 dark:hover:bg-neutral-800/50 flex items-center justify-between transition-colors text-sm"
                   >
                     <div className="flex items-center gap-2 truncate pr-2">
                       <FolderOutlined className="text-neutral-400 text-base shrink-0" />
