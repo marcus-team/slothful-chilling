@@ -1,6 +1,5 @@
 {
   "name": "slothfulchilling",
   "description": "Web đọc truyện chữ phong cách GitBook đơn sắc, tối giản, hỗ trợ đa thiết bị và đồng bộ Google Drive.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": []
 }
