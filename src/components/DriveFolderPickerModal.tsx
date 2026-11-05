@@ -11,12 +11,12 @@ import {
 } from '@ant-design/icons';
 import { Novel } from '../types/novel';
 import { listDriveFolders, scanDriveForNovels, DriveFolderItem } from '../services/googleDrive';
-import { User } from 'firebase/auth';
+import { GoogleUser } from '../services/googleAuth';
 
 interface DriveFolderPickerModalProps {
   open: boolean;
   onClose: () => void;
-  user: User | null;
+  user: GoogleUser | null;
   accessToken: string | null;
   onLogin: () => Promise<void>;
   onLogout: () => Promise<void>;

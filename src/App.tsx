@@ -6,9 +6,8 @@ import { ReaderHeader } from './components/ReaderHeader';
 import { ReaderCanvas } from './components/ReaderCanvas';
 import { DriveFolderPickerModal } from './components/DriveFolderPickerModal';
 import { useOverscrollNavigation } from './hooks/useOverscrollNavigation';
-import { initAuth, googleSignIn, logout as authLogout, getAccessToken } from './services/firebaseAuth';
+import { initAuth, googleSignIn, logout as authLogout, getAccessToken, GoogleUser } from './services/googleAuth';
 import { fetchChapterText, scanDriveForNovels } from './services/googleDrive';
-import { User } from 'firebase/auth';
 import { message } from 'antd';
 
 const STORAGE_KEY_SETTINGS = 'slothful_reading_settings';
@@ -106,7 +105,7 @@ export default function App() {
   const [isLoadingContent, setIsLoadingContent] = useState(false);
 
   // --- Auth & Google Drive State ---
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<GoogleUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);

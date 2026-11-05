@@ -13,7 +13,7 @@ import {
   CheckOutlined,
 } from '@ant-design/icons';
 import { PWAInstallButton } from './PWAInstallButton';
-import { User } from 'firebase/auth';
+import { GoogleUser } from '../services/googleAuth';
 
 interface ReaderHeaderProps {
   currentNovel: Novel;
@@ -23,7 +23,7 @@ interface ReaderHeaderProps {
   settings: ReadingSettings;
   onUpdateSettings: (newSettings: Partial<ReadingSettings>) => void;
   onOpenDriveModal: () => void;
-  user: User | null;
+  user: GoogleUser | null;
   scrollProgress: number; // 0 to 1
   isZenMode: boolean;
   onToggleZenMode: () => void;
