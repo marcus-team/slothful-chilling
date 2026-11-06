@@ -797,5 +797,6 @@ export default function App() {
         novels={allNovels}
         onClose={() => setEditingNovelId(null)}
       />
+    </div>
   );
 }
