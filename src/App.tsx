@@ -6,7 +6,6 @@ import { ReaderCanvas, ContentStatus } from './components/ReaderCanvas';
 import { ImportModal } from './components/ImportModal';
 import { LibraryModal, NovelResume } from './components/LibraryModal';
 import { EmptyLibrary } from './components/EmptyLibrary';
-import { useOverscrollNavigation } from './hooks/useOverscrollNavigation';
 import { watchUser, signInWithGoogle, signOutUser, AppUser } from './services/firebase';
 import {
   subscribeNovels,
@@ -473,13 +472,11 @@ export default function App() {
 
   // Overscroll Navigation hook (scroll past bottom -> next; scroll past top -> prev)
   // Chỉ bật khi chương đã tải xong, tránh nhảy chương nhầm lúc trang còn trống
-  const { bottomProgress, topProgress, isNavigating } = useOverscrollNavigation({
-    onNext: handleNextChapter,
-    onPrev: handlePrevFromOverscroll,
-    hasNext: hasNext && viewStatus === 'ready',
-    hasPrev: hasPrev && viewStatus === 'ready',
-    threshold: 80,
-  });
+  // TẠM TẮT để dò lỗi React #185: không tự chuyển chương khi cuộn
+  const bottomProgress = 0;
+  const topProgress = 0;
+  const isNavigating = false;
+  void handlePrevFromOverscroll;
 
   // Phím tắt ←/→ để chuyển chương (iPad / laptop có bàn phím)
   useEffect(() => {
