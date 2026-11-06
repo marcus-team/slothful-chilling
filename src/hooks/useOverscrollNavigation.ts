@@ -19,6 +19,18 @@ export function useOverscrollNavigation({
   const [overscrollTop, setOverscrollTop] = useState(0);
   const [isNavigating, setIsNavigating] = useState(false);
 
+  // Bản sao giá trị mới nhất để tính toán không cần đọc state cũ
+  const bottomRef = useRef(0);
+  const topRef = useRef(0);
+  const updateBottom = (v: number) => {
+    bottomRef.current = v;
+    setOverscrollBottom(v);
+  };
+  const updateTop = (v: number) => {
+    topRef.current = v;
+    setOverscrollTop(v);
+  };
+
   const cooldownRef = useRef(false);
   const touchStartYRef = useRef<number | null>(null);
   const decayTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -34,11 +46,11 @@ export function useOverscrollNavigation({
     if (cooldownRef.current || !hasNext || !onNext) return;
     cooldownRef.current = true;
     setIsNavigating(true);
-    setOverscrollBottom(threshold);
+    updateBottom(threshold);
 
     setTimeout(() => {
       onNext();
-      setOverscrollBottom(0);
+      updateBottom(0);
       setIsNavigating(false);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       setTimeout(() => {
@@ -51,11 +63,11 @@ export function useOverscrollNavigation({
     if (cooldownRef.current || !hasPrev || !onPrev) return;
     cooldownRef.current = true;
     setIsNavigating(true);
-    setOverscrollTop(threshold);
+    updateTop(threshold);
 
     setTimeout(() => {
       onPrev();
-      setOverscrollTop(0);
+      updateTop(0);
       setIsNavigating(false);
       // When going to previous chapter, scroll to bottom or top
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -78,35 +90,26 @@ export function useOverscrollNavigation({
 
       // Bottom overscroll (scrolling down further)
       if (isAtBottom && e.deltaY > 0 && hasNext) {
-        setOverscrollBottom((prev) => {
-          const nextVal = Math.min(threshold, prev + Math.abs(e.deltaY) * 0.45);
-          if (nextVal >= threshold) {
-            triggerNext();
-            return threshold;
-          }
-          return nextVal;
-        });
+        // Không gọi setState bên trong hàm cập nhật của setState khác (gây lặp vô hạn khi chương ngắn)
+        const nextVal = Math.min(threshold, bottomRef.current + Math.abs(e.deltaY) * 0.45);
+        updateBottom(nextVal);
+        if (nextVal >= threshold) triggerNext();
 
         clearDecay();
         decayTimerRef.current = setTimeout(() => {
-          setOverscrollBottom(0);
+          updateBottom(0);
         }, 300);
       }
 
       // Top overscroll (scrolling up further)
       if (isAtTop && e.deltaY < 0 && hasPrev) {
-        setOverscrollTop((prev) => {
-          const nextVal = Math.min(threshold, prev + Math.abs(e.deltaY) * 0.45);
-          if (nextVal >= threshold) {
-            triggerPrev();
-            return threshold;
-          }
-          return nextVal;
-        });
+        const nextVal = Math.min(threshold, topRef.current + Math.abs(e.deltaY) * 0.45);
+        updateTop(nextVal);
+        if (nextVal >= threshold) triggerPrev();
 
         clearDecay();
         decayTimerRef.current = setTimeout(() => {
-          setOverscrollTop(0);
+          updateTop(0);
         }, 300);
       }
     };
@@ -132,10 +135,10 @@ export function useOverscrollNavigation({
 
       if (isAtBottom && deltaY > 15 && hasNext) {
         const pullAmount = Math.min(threshold, deltaY * 0.6);
-        setOverscrollBottom(pullAmount);
+        updateBottom(pullAmount);
       } else if (isAtTop && deltaY < -15 && hasPrev) {
         const pullAmount = Math.min(threshold, Math.abs(deltaY) * 0.6);
-        setOverscrollTop(pullAmount);
+        updateTop(pullAmount);
       }
     };
 
@@ -143,13 +146,13 @@ export function useOverscrollNavigation({
       if (overscrollBottom >= threshold * 0.85 && hasNext) {
         triggerNext();
       } else {
-        setOverscrollBottom(0);
+        updateBottom(0);
       }
 
       if (overscrollTop >= threshold * 0.85 && hasPrev) {
         triggerPrev();
       } else {
-        setOverscrollTop(0);
+        updateTop(0);
       }
 
       touchStartYRef.current = null;
