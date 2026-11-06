@@ -382,6 +382,8 @@ export async function importNovel(
       skipped.push(sorted[i].name);
     }
     onProgress?.({ stage: 'reading', done: i + 1, total: sorted.length });
+    // Nhường trình duyệt định kỳ: đọc epub gần như tức thì, nếu không nghỉ thì React báo lặp cập nhật (#185)
+    if (i % 25 === 24) await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   if (chapters.length === 0) throw new Error('Không đọc được chương nào từ các file đã chọn.');
