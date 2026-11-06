@@ -102,7 +102,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Đọc tiếp */}
         {latest && (
           <section className="mb-6">
-            <h2 className="text-xs uppercase tracking-widest text-neutral-500 font-mono mb-2">Đọc tiếp</h2>
+            <h2 className="text-xs uppercase tracking-widest text-neutral-500 font-sans tabular-nums mb-2">Đọc tiếp</h2>
             <div className="flex gap-4 p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900/60">
               <NovelCover title={latest.novel.title} cover={latest.novel.cover} className="w-24 h-36 rounded-md shrink-0" />
               <div className="min-w-0 flex-1 flex flex-col">
@@ -119,7 +119,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     style={{ width: `${percentOf(latest.resume, latest.novel)}%` }}
                   />
                 </div>
-                <div className="text-[11px] text-neutral-500 font-mono mt-1">
+                <div className="text-[11px] text-neutral-500 font-sans tabular-nums mt-1">
                   {latest.resume ? latest.resume.index + 1 : 0}/{latest.novel.chapters.length} chương
                 </div>
                 <Button
@@ -147,7 +147,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               key={s.label}
               className="rounded-lg border border-neutral-200 dark:border-neutral-800 px-3 py-2.5 text-center"
             >
-              <div className="text-xl font-semibold font-mono">{s.value}</div>
+              <div className="text-xl font-semibold font-sans tabular-nums">{s.value}</div>
               <div className="text-[11px] text-neutral-500">{s.label} (chương)</div>
             </div>
           ))}
@@ -155,7 +155,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Thư viện */}
         <section>
-          <h2 className="text-xs uppercase tracking-widest text-neutral-500 font-mono mb-3">
+          <h2 className="text-xs uppercase tracking-widest text-neutral-500 font-sans tabular-nums mb-3">
             Thư viện · {novels.length} truyện
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -176,7 +176,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     )}
                   </div>
                   <div className="mt-2 text-sm font-medium leading-snug line-clamp-2">{novel.title}</div>
-                  <div className="text-[11px] text-neutral-500 font-mono mt-0.5">
+                  <div className="text-[11px] text-neutral-500 font-sans tabular-nums mt-0.5">
                     {pct > 0 ? `${pct}% · ` : ''}
                     {novel.chapters.length} chương
                   </div>

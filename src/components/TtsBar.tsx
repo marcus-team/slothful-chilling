@@ -431,7 +431,7 @@ export const TtsBar: React.FC<TtsBarProps> = ({
             <StepForwardOutlined />
           </button>
 
-          <div className="flex-1 min-w-0 px-2 text-xs text-neutral-500 font-mono truncate">
+          <div className="flex-1 min-w-0 px-2 text-xs text-neutral-500 font-sans tabular-nums truncate">
             {paragraphs.length === 0
               ? 'Đang tải...'
               : loading
@@ -484,7 +484,7 @@ export const TtsBar: React.FC<TtsBarProps> = ({
             </optgroup>
           </select>
           {usingAzure && (
-            <p className="m-0 mt-1 text-[11px] text-neutral-500 font-mono">
+            <p className="m-0 mt-1 text-[11px] text-neutral-500 font-sans tabular-nums">
               Đã dùng ≈ {used.toLocaleString('vi-VN')}/{AZURE_MONTHLY_LIMIT.toLocaleString('vi-VN')} ký tự miễn phí tháng này
             </p>
           )}

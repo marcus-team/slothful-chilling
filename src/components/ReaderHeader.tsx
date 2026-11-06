@@ -87,7 +87,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
       <div>
         <div className={`${sectionLabel} flex items-center justify-between`}>
           <span>Cỡ chữ</span>
-          <span className="font-mono">{settings.fontSize}px</span>
+          <span className="font-sans tabular-nums">{settings.fontSize}px</span>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -279,7 +279,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
         {/* Right: Controls & Account */}
         <div className="flex items-center gap-0.5 shrink-0">
           {/* Scroll progress % */}
-          <div className="hidden min-[400px]:block text-[11px] font-mono text-neutral-500 w-9 text-right mr-1">
+          <div className="hidden min-[400px]:block text-[11px] font-sans tabular-nums text-neutral-500 w-9 text-right mr-1">
             {Math.round(scrollProgress * 100)}%
           </div>
 

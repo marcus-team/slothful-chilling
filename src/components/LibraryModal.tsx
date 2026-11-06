@@ -85,7 +85,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                         strokeColor="#111"
                         className="!m-0 flex-1"
                       />
-                      <span className="text-[11px] font-mono text-neutral-500 shrink-0">
+                      <span className="text-[11px] font-sans tabular-nums text-neutral-500 shrink-0">
                         {resume.index + 1}/{total}
                       </span>
                     </div>

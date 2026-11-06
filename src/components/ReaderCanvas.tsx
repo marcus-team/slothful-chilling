@@ -141,7 +141,7 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
       <article className={`mx-auto ${maxWidthClass}`}>
         {/* Chapter Header (GitBook editorial presentation) */}
         <header className="pb-8 mb-8 border-b border-neutral-200 dark:border-neutral-800">
-          <div className="text-xs uppercase tracking-widest text-neutral-400 font-mono mb-2">
+          <div className="text-xs uppercase tracking-widest text-neutral-400 font-sans tabular-nums mb-2">
             {currentNovel.title}
           </div>
 
@@ -150,7 +150,7 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
           </h1>
 
           {/* Clean unboxed metadata (anti-slop discipline) */}
-          <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 font-mono">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500 font-sans tabular-nums">
             <span className="flex items-center gap-1">
               <FileTextOutlined className="text-neutral-400" />
               <span>{wordCount.toLocaleString()} từ</span>

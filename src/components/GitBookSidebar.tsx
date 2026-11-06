@@ -144,7 +144,7 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
       >
         <div className="flex items-center gap-2 truncate pr-2">
           <span
-            className={`font-mono text-xs lg:text-[11px] shrink-0 ${
+            className={`font-sans tabular-nums text-xs lg:text-[11px] shrink-0 ${
               isActive
                 ? 'text-neutral-950 dark:text-white font-bold'
                 : 'text-neutral-400 group-hover:text-neutral-600'
@@ -193,7 +193,7 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
               <span className="font-semibold text-sm tracking-tight text-neutral-900 dark:text-neutral-100 flex items-center gap-1.5">
                 slothfulchilling
               </span>
-              <span className="text-[11px] text-neutral-500 font-mono">reading · chilling</span>
+              <span className="text-[11px] text-neutral-500 font-sans tabular-nums">reading · chilling</span>
             </div>
           </div>
 
@@ -228,7 +228,7 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
               <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 truncate">
                 {currentNovel.title}
               </div>
-              <div className="text-xs text-neutral-500 font-mono mt-0.5">
+              <div className="text-xs text-neutral-500 font-sans tabular-nums mt-0.5">
                 {currentIndex >= 0 ? currentIndex + 1 : 1}/{chapters.length} chương
                 {novels.length > 1 ? ` · ${novels.length} truyện` : ''}
               </div>
@@ -262,7 +262,7 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
           <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400 px-2 py-1 flex items-center justify-between">
             <span>MỤC LỤC CHƯƠNG</span>
             {query && (
-              <span className="text-[10px] text-neutral-500 font-mono">
+              <span className="text-[10px] text-neutral-500 font-sans tabular-nums">
                 {Math.min(searchResults.length, MAX_SEARCH_RESULTS)}/{searchResults.length} kết quả
               </span>
             )}
