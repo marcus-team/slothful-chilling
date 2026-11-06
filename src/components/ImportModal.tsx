@@ -6,6 +6,7 @@ import { AppUser } from '../services/firebase';
 import {
   ChapterSource,
   ImportProgress,
+  imageToCover,
   importNovel,
   isChapterFile,
   isEpubFile,
@@ -39,6 +40,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [epubSources, setEpubSources] = useState<ChapterSource[] | null>(null);
   const [isReadingEpub, setIsReadingEpub] = useState(false);
   const [title, setTitle] = useState('');
+  const [author, setAuthor] = useState('');
+  const [cover, setCover] = useState<string | undefined>(undefined);
+  const coverInput = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
@@ -59,6 +63,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         setFiles(picked);
         setEpubSources(book.sources);
         setTitle(book.title);
+        setAuthor(book.author || '');
+        setCover(book.cover);
       } catch (err: any) {
         console.error(err);
         message.error(err?.message || 'Không đọc được file .epub');
@@ -68,6 +74,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       return;
     }
     setEpubSources(null);
+    setAuthor('');
+    setCover(undefined);
     setFiles(picked);
     if (fromFolder) {
       // Tên thư mục đã chọn = tên truyện
@@ -80,7 +88,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setFiles([]);
     setEpubSources(null);
     setTitle('');
+    setAuthor('');
+    setCover(undefined);
     setProgress(null);
+    if (coverInput.current) coverInput.current.value = '';
     if (folderInput.current) folderInput.current.value = '';
     if (filesInput.current) filesInput.current.value = '';
   };
@@ -89,7 +100,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsImporting(true);
     setProgress({ stage: 'reading', done: 0, total: sources.length });
     try {
-      const { novel, skipped } = await importNovel(title, sources, setProgress);
+      const { novel, skipped } = await importNovel(title, sources, setProgress, { author, cover });
       message.success(`Đã nhập "${novel.title}" (${novel.chapters.length} chương)`);
       if (skipped.length > 0) {
         message.warning(`Bỏ qua ${skipped.length} file không đọc được: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`, 8);
@@ -220,6 +231,48 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   Đã có truyện tên này: nhập lại sẽ thay thế bản cũ.
                 </p>
               )}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs text-neutral-500">Tác giả (tùy chọn)</label>
+              <Input
+                value={author}
+                onChange={(e) => setAuthor(e.target.value)}
+                placeholder="Tên tác giả"
+                disabled={isImporting}
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-[72px] rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 overflow-hidden shrink-0 flex items-center justify-center text-[10px] text-neutral-400">
+                {cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : 'Bìa'}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button size="small" onClick={() => coverInput.current?.click()} disabled={isImporting}>
+                  {cover ? 'Đổi ảnh bìa' : 'Chọn ảnh bìa'}
+                </Button>
+                {cover && (
+                  <Button size="small" onClick={() => setCover(undefined)} disabled={isImporting}>
+                    Bỏ ảnh bìa
+                  </Button>
+                )}
+              </div>
+              <input
+                ref={coverInput}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const img = e.target.files?.[0];
+                  if (!img) return;
+                  try {
+                    setCover(await imageToCover(img));
+                  } catch {
+                    message.error('Không đọc được ảnh này');
+                  }
+                  e.target.value = '';
+                }}
+              />
             </div>
 
             {isImporting && progress ? (

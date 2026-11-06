@@ -4,6 +4,11 @@ import { GitBookSidebar } from './components/GitBookSidebar';
 import { ReaderHeader } from './components/ReaderHeader';
 import { ReaderCanvas, ContentStatus } from './components/ReaderCanvas';
 import { useOverscrollNavigation } from './hooks/useOverscrollNavigation';
+import { useWakeLock } from './hooks/useWakeLock';
+import { HomeScreen } from './components/HomeScreen';
+import { TtsBar } from './components/TtsBar';
+import { loadProgress, saveProgress, RemoteProgress } from './services/progress';
+import { splitParagraphs } from './utils/text';
 import { ImportModal } from './components/ImportModal';
 import { LibraryModal, NovelResume } from './components/LibraryModal';
 import { EmptyLibrary } from './components/EmptyLibrary';
@@ -52,6 +57,7 @@ const buildDefaultSettings = (): ReadingSettings => ({
       : 'light',
   textAlign: 'left',
   maxWidth: 'normal',
+  tapScroll: true,
 });
 
 interface ContentState {
@@ -133,6 +139,47 @@ export default function App() {
   const [isZenMode, setIsZenMode] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [isHeaderHidden, setIsHeaderHidden] = useState(false);
+  const [showHome, setShowHome] = useState(true); // mở app là vào trang chủ "Đọc tiếp"
+  const [ttsOpen, setTtsOpen] = useState(false);
+  const [ttsIndex, setTtsIndex] = useState<number | null>(null);
+
+  // Giá trị mới nhất cho các listener chạy một lần
+  const userRef = useRef(user);
+  userRef.current = user;
+  const showHomeRef = useRef(showHome);
+  showHomeRef.current = showHome;
+
+  // Đẩy vị trí đọc lên Firestore (gộp lại, tối đa 1 lần mỗi 4 giây)
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingProgressRef = useRef<RemoteProgress | null>(null);
+  const flushProgress = useCallback(() => {
+    if (progressTimerRef.current) {
+      clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+    const pending = pendingProgressRef.current;
+    const u = userRef.current;
+    pendingProgressRef.current = null;
+    if (pending && u) saveProgress(u.uid, pending).catch(() => {});
+  }, []);
+  const pushProgress = useCallback(
+    (novelId: string, chapterId: string, scrollRatio: number) => {
+      pendingProgressRef.current = { novelId, chapterId, scrollRatio, updatedAt: Date.now() };
+      if (!progressTimerRef.current) progressTimerRef.current = setTimeout(flushProgress, 4000);
+    },
+    [flushProgress]
+  );
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') flushProgress();
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', flushProgress);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', flushProgress);
+    };
+  }, [flushProgress]);
 
   // Reading history store (tiến độ từng chương: vị trí cuộn + lần đọc gần nhất)
   const [readingHistory, setReadingHistory] = useState<Record<string, ReadingHistoryItem>>(() =>
@@ -231,7 +278,51 @@ export default function App() {
     const resume = getResume(novel);
     setCurrentNovelId(novel.id);
     setCurrentChapterId(resume ? resume.chapter.id : null);
+    setShowHome(false);
   };
+
+  // Đăng nhập xong: lấy vị trí đọc từ các thiết bị khác, bản nào mới hơn thì dùng
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    loadProgress(user.uid)
+      .then((remote) => {
+        if (cancelled || remote.length === 0) return;
+        const local: ReadingHistoryItem[] = Object.values(historyRef.current);
+        const localNewest = local.reduce((m, h) => Math.max(m, h.updatedAt), 0);
+        const localByNovel: Record<string, number> = {};
+        local.forEach((h) => {
+          localByNovel[h.novelId] = Math.max(localByNovel[h.novelId] ?? 0, h.updatedAt);
+        });
+        const newer = remote.filter((p) => p.updatedAt > (localByNovel[p.novelId] ?? 0));
+        if (newer.length === 0) return;
+
+        setReadingHistory((prev) => {
+          const updated = { ...prev };
+          newer.forEach((p) => {
+            updated[`${p.novelId}_${p.chapterId}`] = {
+              novelId: p.novelId,
+              chapterId: p.chapterId,
+              scrollRatio: p.scrollRatio,
+              updatedAt: p.updatedAt,
+            };
+          });
+          localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
+          return updated;
+        });
+
+        // Người dùng còn ở trang chủ thì chuyển sẵn tới chỗ mới nhất đã đọc ở máy khác
+        const newest = newer.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a));
+        if (showHomeRef.current && newest.updatedAt > localNewest) {
+          setCurrentNovelId(newest.novelId);
+          setCurrentChapterId(newest.chapterId);
+        }
+      })
+      .catch((err) => console.warn('Không lấy được vị trí đọc từ máy khác', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
 
   const handleRemoveNovel = async (novel: Novel) => {
     try {
@@ -352,6 +443,9 @@ export default function App() {
       JSON.stringify({ novelId: currentNovel.id, chapterId: currentChapter.id })
     );
 
+    // Còn ở trang chủ thì chưa tính là đang đọc: không đổi mốc thời gian (để so với vị trí từ máy khác cho đúng)
+    if (showHome) return;
+
     const novelId = currentNovel.id;
     const chapterId = currentChapter.id;
     const key = `${novelId}_${chapterId}`;
@@ -368,7 +462,8 @@ export default function App() {
       localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
       return updated;
     });
-  }, [currentNovel?.id, currentChapter?.id]);
+    pushProgress(novelId, chapterId, historyRef.current[key]?.scrollRatio ?? 0);
+  }, [currentNovel?.id, currentChapter?.id, showHome]);
 
   // Khôi phục vị trí đọc khi nội dung chương đã sẵn sàng
   const restoreStartedRef = useRef<string | null>(null);
@@ -408,6 +503,7 @@ export default function App() {
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
     const handleScroll = () => {
+      if (showHomeRef.current) return; // đang ở trang chủ: không ghi đè vị trí đọc
       const y = window.scrollY;
       const total = document.documentElement.scrollHeight - window.innerHeight;
       const progress = total <= 0 ? 1 : Math.min(1, Math.max(0, y / total));
@@ -444,6 +540,7 @@ export default function App() {
           localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updated));
           return updated;
         });
+        pushProgress(novel.id, chapter.id, progress);
       }, 500);
     };
 
@@ -476,16 +573,52 @@ export default function App() {
   const { bottomProgress, topProgress, isNavigating } = useOverscrollNavigation({
     onNext: handleNextChapter,
     onPrev: handlePrevFromOverscroll,
-    hasNext: hasNext && viewStatus === 'ready',
-    hasPrev: hasPrev && viewStatus === 'ready',
+    hasNext: hasNext && viewStatus === 'ready' && !showHome,
+    hasPrev: hasPrev && viewStatus === 'ready' && !showHome,
     threshold: 80,
   });
+
+  // Giữ màn hình sáng khi đang đọc
+  useWakeLock(!showHome && viewStatus === 'ready');
+
+  // Các đoạn của chương (dùng cho đọc to; cùng cách tách với màn đọc để chỉ số khớp nhau)
+  const paragraphs = useMemo(
+    () => (viewStatus === 'ready' ? splitParagraphs(contentState.text) : []),
+    [viewStatus, contentState.text]
+  );
+
+  // Đọc to: cuộn tới đoạn đang đọc
+  useEffect(() => {
+    if (ttsIndex === null) return;
+    document
+      .querySelector(`[data-para="${ttsIndex}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [ttsIndex]);
+
+  const handleReaderTap = (zone: 'up' | 'down' | 'middle') => {
+    if (zone === 'middle') {
+      setIsHeaderHidden((hidden) => !hidden);
+      return;
+    }
+    const y = window.scrollY;
+    const total = document.documentElement.scrollHeight - window.innerHeight;
+    if (zone === 'down') {
+      // Đã tới cuối chương thì chạm xuống = sang chương kế
+      if (total - y < 8) {
+        if (hasNext && viewStatus === 'ready') handleNextChapter();
+      } else {
+        window.scrollBy({ top: window.innerHeight * 0.85, behavior: 'smooth' });
+      }
+    } else if (y > 2) {
+      window.scrollBy({ top: -window.innerHeight * 0.85, behavior: 'smooth' });
+    }
+  };
 
   // Phím tắt ←/→ để chuyển chương (iPad / laptop có bàn phím)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (isImportOpen || isLibraryOpen) return;
+      if (isImportOpen || isLibraryOpen || showHome) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
         return;
@@ -495,7 +628,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleNextChapter, handlePrevChapter, isImportOpen, isLibraryOpen]);
+  }, [handleNextChapter, handlePrevChapter, isImportOpen, isLibraryOpen, showHome]);
 
   const handleSelectChapter = (chapter: Chapter) => {
     pendingEndRef.current = false;
@@ -582,6 +715,9 @@ export default function App() {
           isZenMode={isZenMode}
           onToggleZenMode={() => setIsZenMode((prev) => !prev)}
           isHidden={isHeaderHidden}
+          onOpenHome={() => setShowHome(true)}
+          isTtsOpen={ttsOpen}
+          onToggleTts={() => setTtsOpen((open) => !open)}
         />
 
         {/* Reading Canvas */}
@@ -603,8 +739,39 @@ export default function App() {
           isNavigating={isNavigating}
           nextChapterTitle={nextChapter?.title}
           prevChapterTitle={prevChapter?.title}
+          activeParagraph={ttsIndex}
+          tapScroll={settings.tapScroll}
+          onTapZone={handleReaderTap}
         />
+        {ttsOpen && <div className="h-36" aria-hidden="true" />}
       </div>
+
+      {/* Đọc to */}
+      {ttsOpen && (
+        <TtsBar
+          paragraphs={paragraphs}
+          chapterId={currentChapter.id}
+          hasNext={hasNext}
+          onNextChapter={handleNextChapter}
+          onActiveIndex={setTtsIndex}
+          onClose={() => setTtsOpen(false)}
+        />
+      )}
+
+      {/* Trang chủ: đọc tiếp, thư viện, thống kê */}
+      {showHome && (
+        <HomeScreen
+          novels={allNovels}
+          user={user}
+          theme={settings.theme}
+          readingHistory={readingHistory}
+          getResume={getResume}
+          currentNovelId={currentNovel.id}
+          onRead={startNovel}
+          onClose={() => setShowHome(false)}
+          onOpenImport={() => setIsImportOpen(true)}
+        />
+      )}
 
       {/* Tủ truyện: đổi truyện, xem tiến độ, "đọc tiếp" */}
       <LibraryModal

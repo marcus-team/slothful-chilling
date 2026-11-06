@@ -7,6 +7,8 @@ import {
   CloudSyncOutlined,
   FullscreenOutlined,
   FullscreenExitOutlined,
+  HomeOutlined,
+  SoundOutlined,
 } from '@ant-design/icons';
 import { PWAInstallButton } from './PWAInstallButton';
 import { AppUser } from '../services/firebase';
@@ -24,6 +26,9 @@ interface ReaderHeaderProps {
   isZenMode: boolean;
   onToggleZenMode: () => void;
   isHidden: boolean; // ẩn header khi cuộn xuống để có thêm chỗ đọc
+  onOpenHome: () => void;
+  isTtsOpen: boolean;
+  onToggleTts: () => void;
 }
 
 const iconButton =
@@ -53,6 +58,9 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
   isZenMode,
   onToggleZenMode,
   isHidden,
+  onOpenHome,
+  isTtsOpen,
+  onToggleTts,
 }) => {
   // Reading settings popover content
   const settingsContent = (
@@ -199,6 +207,28 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
         </div>
       </div>
 
+      {/* Chạm mép màn hình để cuộn (điện thoại) */}
+      <div className="md:hidden">
+        <div className={sectionLabel}>Chạm mép để cuộn</div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            onClick={() => onUpdateSettings({ tapScroll: true })}
+            className={optionButton(settings.tapScroll)}
+          >
+            Bật
+          </button>
+          <button
+            onClick={() => onUpdateSettings({ tapScroll: false })}
+            className={optionButton(!settings.tapScroll)}
+          >
+            Tắt
+          </button>
+        </div>
+        <p className="text-[11px] text-neutral-400 mt-1 mb-0 leading-snug">
+          Chạm phần trên/dưới màn hình để cuộn lên/xuống, chạm giữa để ẩn hiện thanh trên.
+        </p>
+      </div>
+
       {/* Reading Width (chủ yếu hữu ích trên iPad / laptop) */}
       <div className="hidden md:block">
         <div className={sectionLabel}>Độ rộng trang</div>
@@ -232,6 +262,9 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
           <button onClick={onToggleSidebar} aria-label="Mở mục lục" className={`${iconButton} shrink-0 lg:hidden`}>
             <MenuOutlined className="text-base" />
           </button>
+          <button onClick={onOpenHome} aria-label="Trang chủ" title="Trang chủ" className={`${iconButton} shrink-0`}>
+            <HomeOutlined className="text-base" />
+          </button>
 
           <nav className="flex flex-col min-w-0 leading-tight">
             <span className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">
@@ -246,12 +279,22 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
         {/* Right: Controls & Account */}
         <div className="flex items-center gap-0.5 shrink-0">
           {/* Scroll progress % */}
-          <div className="text-[11px] font-mono text-neutral-500 w-9 text-right mr-1">
+          <div className="hidden min-[400px]:block text-[11px] font-mono text-neutral-500 w-9 text-right mr-1">
             {Math.round(scrollProgress * 100)}%
           </div>
 
           {/* PWA Install */}
           <PWAInstallButton />
+
+          {/* Đọc to */}
+          <button
+            onClick={onToggleTts}
+            aria-label="Đọc to"
+            title="Đọc to"
+            className={`${iconButton} ${isTtsOpen ? '!text-neutral-900 dark:!text-white bg-neutral-100 dark:bg-neutral-800' : ''}`}
+          >
+            <SoundOutlined className="text-base" />
+          </button>
 
           {/* Reading Settings Popover */}
           <Popover content={settingsContent} trigger="click" placement="bottomRight" arrow={false}>

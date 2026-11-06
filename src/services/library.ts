@@ -29,11 +29,13 @@ export function subscribeNovels(
     collection(db, NOVELS),
     (snap) => {
       const novels: Novel[] = snap.docs.map((d) => {
-        const data = d.data() as { title?: string; chapters?: Chapter[] };
+        const data = d.data() as { title?: string; chapters?: Chapter[]; author?: string; cover?: string };
         return {
           id: d.id,
           title: data.title || 'Không tên',
           chapters: Array.isArray(data.chapters) ? data.chapters : [],
+          author: data.author || undefined,
+          cover: data.cover || undefined,
         };
       });
       novels.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
@@ -188,6 +190,21 @@ export function sourcesFromFiles(files: File[]): ChapterSource[] {
 
 export const isEpubFile = (file: File): boolean => /\.epub$/i.test(file.name);
 
+// Thu nhỏ ảnh bìa (~240px) để lưu gọn trong tài liệu truyện (vài chục KB)
+export async function imageToCover(blob: Blob): Promise<string> {
+  const bitmap = await createImageBitmap(blob);
+  const width = Math.min(240, bitmap.width);
+  const height = Math.max(1, Math.round((bitmap.height * width) / bitmap.width));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Không xử lý được ảnh bìa');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
 const XHTML_BLOCKS = 'p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,div,table,ul,ol,section';
 const LEAF_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'PRE', 'DT', 'DD', 'FIGCAPTION', 'TD', 'TH']);
 
@@ -234,8 +251,16 @@ function resolvePath(baseDir: string, href: string): string {
 }
 
 // .epub là file zip: container.xml -> file .opf (danh sách + thứ tự chương) -> các trang XHTML
-export async function readEpub(file: File): Promise<{ title: string; sources: ChapterSource[] }> {
-  const files = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+export interface EpubBook {
+  title: string;
+  author?: string;
+  cover?: string;
+  sources: ChapterSource[];
+}
+
+export async function readEpub(file: File): Promise<EpubBook> {
+  const raw = new Uint8Array(await file.arrayBuffer());
+  const files = unzipSync(raw, {
     filter: (f) => /\.(x?html?|opf|ncx|xml)$/i.test(f.name),
   });
   const text = (path: string) => (files[path] ? strFromU8(files[path]) : null);
@@ -253,12 +278,35 @@ export async function readEpub(file: File): Promise<{ title: string; sources: Ch
   const bookTitle =
     opf.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', 'title')[0]?.textContent?.trim() || '';
 
+  const author =
+    opf.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', 'creator')[0]?.textContent?.trim() || undefined;
+
   const manifest = new Map<string, { path: string; props: string }>();
   Array.from(opf.getElementsByTagName('item')).forEach((it) => {
     const id = it.getAttribute('id');
     const href = it.getAttribute('href');
     if (id && href) manifest.set(id, { path: resolvePath(baseDir, href), props: it.getAttribute('properties') || '' });
   });
+
+  // Ảnh bìa: khai báo trong <meta name="cover"> (epub2) hoặc properties="cover-image" (epub3)
+  let cover: string | undefined;
+  try {
+    const metaId = Array.from(opf.getElementsByTagName('meta'))
+      .find((m) => m.getAttribute('name') === 'cover')
+      ?.getAttribute('content');
+    const isImage = (p: string) => /\.(jpe?g|png|webp|gif)$/i.test(p);
+    const coverPath =
+      [manifest.get(metaId || '')?.path, ...Array.from(manifest.values())
+        .filter((m) => m.props.split(/\s+/).includes('cover-image'))
+        .map((m) => m.path)].find((p): p is string => !!p && isImage(p));
+    if (coverPath) {
+      const imgs = unzipSync(raw, { filter: (f) => f.name === coverPath });
+      const bytes = imgs[coverPath];
+      if (bytes) cover = await imageToCover(new Blob([bytes]));
+    }
+  } catch (err) {
+    console.warn('Không lấy được ảnh bìa epub', err);
+  }
 
   // Tên chương lấy từ mục lục của sách (nav của epub3 hoặc toc.ncx của epub2)
   const tocTitles = new Map<string, string>();
@@ -307,7 +355,7 @@ export async function readEpub(file: File): Promise<{ title: string; sources: Ch
   }
 
   if (sources.length === 0) throw new Error('Không đọc được chương nào trong file .epub này.');
-  return { title: bookTitle || file.name.replace(/\.epub$/i, ''), sources };
+  return { title: bookTitle || file.name.replace(/\.epub$/i, ''), author, cover, sources };
 }
 
 // ---------------- Nhập truyện ----------------
@@ -334,7 +382,8 @@ const hashTitle = (title: string) => {
 export async function importNovel(
   title: string,
   sorted: ChapterSource[],
-  onProgress?: (p: ImportProgress) => void
+  onProgress?: (p: ImportProgress) => void,
+  meta?: { author?: string; cover?: string }
 ): Promise<ImportResult> {
   const novelTitle = title.trim();
   if (!novelTitle) throw new Error('Thiếu tên truyện');
@@ -391,12 +440,16 @@ export async function importNovel(
   await flush();
 
   // Ghi mục lục sau cùng: truyện chỉ hiện ra khi đã đủ nội dung
-  const novel: Novel = { id: novelId, title: novelTitle, chapters };
+  const author = meta?.author?.trim() || undefined;
+  const cover = meta?.cover || undefined;
+  const novel: Novel = { id: novelId, title: novelTitle, chapters, author, cover };
   const indexBatch = writeBatch(db);
   indexBatch.set(doc(db, NOVELS, novelId), {
     title: novelTitle,
     chapters,
     updatedAt: Date.now(),
+    ...(author ? { author } : {}),
+    ...(cover ? { cover } : {}),
   });
   await indexBatch.commit();
 

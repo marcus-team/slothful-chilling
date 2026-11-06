@@ -10,6 +10,7 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons';
 import { Button, Spin } from 'antd';
+import { splitParagraphs } from '../utils/text';
 
 export type ContentStatus = 'idle' | 'loading' | 'ready' | 'needs-auth' | 'error';
 
@@ -31,6 +32,9 @@ interface ReaderCanvasProps {
   isNavigating: boolean;
   nextChapterTitle?: string;
   prevChapterTitle?: string;
+  activeParagraph?: number | null; // đoạn đang được đọc to
+  tapScroll?: boolean;
+  onTapZone?: (zone: 'up' | 'down' | 'middle') => void;
 }
 
 export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
@@ -51,15 +55,22 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
   isNavigating,
   nextChapterTitle,
   prevChapterTitle,
+  activeParagraph = null,
+  tapScroll = false,
+  onTapZone,
 }) => {
   // Split content into clean paragraphs
-  const paragraphs = useMemo(() => {
-    if (!chapterContent) return [];
-    return chapterContent
-      .split(/\r?\n\s*\r?\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0);
-  }, [chapterContent]);
+  const paragraphs = useMemo(() => splitParagraphs(chapterContent), [chapterContent]);
+
+  // Điện thoại: chạm mép trên/dưới để cuộn lên/xuống, chạm giữa để ẩn/hiện thanh trên
+  const handleTap = (e: React.MouseEvent) => {
+    if (!tapScroll || !onTapZone) return;
+    if (!window.matchMedia('(pointer: coarse)').matches) return;
+    if ((e.target as HTMLElement).closest('button,a,input,textarea,select,[role="button"]')) return;
+    if (window.getSelection()?.toString()) return;
+    const ratio = e.clientY / window.innerHeight;
+    onTapZone(ratio < 0.28 ? 'up' : ratio > 0.72 ? 'down' : 'middle');
+  };
 
   // Compute word count and reading time
   const { wordCount, readingTimeMinutes } = useMemo(() => {
@@ -75,6 +86,9 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
       behavior: 'smooth',
     });
   };
+
+  const highlight = (index: number) =>
+    activeParagraph === index ? 'bg-amber-200/60 dark:bg-amber-400/20 rounded -mx-2 px-2 transition-colors' : '';
 
   // Font family class mapper
   const fontClass = {
@@ -99,6 +113,8 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
 
   return (
     <main
+      onClick={handleTap}
+      style={{ touchAction: 'manipulation' }}
       className={`min-h-screen py-8 px-4 sm:px-8 lg:px-12 transition-colors duration-200 ${themeContainerStyle}`}
     >
       {/* Top Overscroll Indicator (Roll up past top to previous chapter) */}
@@ -197,7 +213,11 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
                 const restOfPara = para.slice(1);
 
                 return (
-                  <p key={index} className="mb-6 text-neutral-850 dark:text-neutral-200">
+                  <p
+                    key={index}
+                    data-para={index}
+                    className={`mb-6 text-neutral-850 dark:text-neutral-200 ${highlight(index)}`}
+                  >
                     <span className="float-left text-4xl sm:text-5xl font-serif font-bold mr-2 mt-1 leading-none text-neutral-900 dark:text-white select-none">
                       {firstLetter}
                     </span>
@@ -207,7 +227,11 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
               }
 
               return (
-                <p key={index} className="mb-6 text-neutral-850 dark:text-neutral-200">
+                <p
+                  key={index}
+                  data-para={index}
+                  className={`mb-6 text-neutral-850 dark:text-neutral-200 ${highlight(index)}`}
+                >
                   {para}
                 </p>
               );
