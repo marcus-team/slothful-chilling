@@ -162,7 +162,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {items.map(({ novel, resume }) => {
               const pct = percentOf(resume, novel);
               return (
-                <button key={novel.id} onClick={() => onRead(novel)} className="text-left group">
+                <button key={novel.id} onClick={() => onRead(novel)} className="text-left group flex flex-col self-start w-full">
                   <div className="relative">
                     <NovelCover
                       title={novel.title}
