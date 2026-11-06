@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
-import { Button } from 'antd';
-import { CloseOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
+import React, { useMemo, useState } from 'react';
+import { Button, Input, Select } from 'antd';
+import { CloseOutlined, EditOutlined, PlusOutlined, ReadOutlined, SearchOutlined } from '@ant-design/icons';
 import { Novel, ReadingHistoryItem, ThemeMode } from '../types/novel';
 import { AppUser } from '../services/firebase';
 import { NovelResume } from './LibraryModal';
 import { NovelCover } from './NovelCover';
+import { sameName } from '../utils/categories';
 
 interface HomeScreenProps {
   novels: Novel[];
@@ -14,16 +15,26 @@ interface HomeScreenProps {
   getResume: (novel: Novel) => NovelResume | null;
   currentNovelId: string;
   onRead: (novel: Novel) => void;
+  onEditNovel: (novel: Novel) => void;
   onClose: () => void;
   onOpenImport: () => void;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
+const UNCATEGORIZED = '__none__';
 
 const percentOf = (resume: NovelResume | null, novel: Novel) =>
   resume && resume.updatedAt > 0 && novel.chapters.length > 0
     ? Math.round(((resume.index + 1) / novel.chapters.length) * 100)
     : 0;
+
+// Bỏ dấu để tìm "tien hiep" cũng ra "Tiên hiệp"
+const plain = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd');
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
   novels,
@@ -33,9 +44,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   getResume,
   currentNovelId,
   onRead,
+  onEditNovel,
   onClose,
   onOpenImport,
 }) => {
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<string | null>(null);
+  const [author, setAuthor] = useState<string | null>(null);
+
   const items = useMemo(
     () => novels.map((novel) => ({ novel, resume: getResume(novel) })),
     [novels, getResume]
@@ -60,7 +76,53 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     };
   }, [readingHistory]);
 
-  const bg = theme === 'dark' ? 'bg-neutral-950 text-neutral-100' : theme === 'warm' ? 'bg-neutral-50 text-neutral-900' : 'bg-white text-neutral-900';
+  // Thể loại và tác giả đang có trong thư viện (kèm số truyện)
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    novels.forEach((n) => (n.categories || []).forEach((c) => counts.set(c, (counts.get(c) || 0) + 1)));
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'vi'));
+  }, [novels]);
+  const uncategorizedCount = useMemo(() => novels.filter((n) => !n.categories?.length).length, [novels]);
+  const authorCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    novels.forEach((n) => n.author && counts.set(n.author, (counts.get(n.author) || 0) + 1));
+    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0], 'vi'));
+  }, [novels]);
+
+  const filtered = useMemo(() => {
+    const q = plain(query.trim());
+    return items.filter(({ novel }) => {
+      if (category === UNCATEGORIZED) {
+        if (novel.categories?.length) return false;
+      } else if (category && !novel.categories?.some((c) => sameName(c, category))) {
+        return false;
+      }
+      if (author && !(novel.author && sameName(novel.author, author))) return false;
+      if (q && !plain(`${novel.title} ${novel.author || ''}`).includes(q)) return false;
+      return true;
+    });
+  }, [items, query, category, author]);
+
+  const hasFilter = !!(query.trim() || category || author);
+  const clearFilters = () => {
+    setQuery('');
+    setCategory(null);
+    setAuthor(null);
+  };
+
+  const bg =
+    theme === 'dark'
+      ? 'bg-neutral-950 text-neutral-100'
+      : theme === 'warm'
+      ? 'bg-neutral-50 text-neutral-900'
+      : 'bg-white text-neutral-900';
+
+  const chip = (active: boolean) =>
+    `shrink-0 h-8 px-3 rounded-full text-sm border transition-colors ${
+      active
+        ? 'bg-neutral-900 text-white border-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:border-neutral-100'
+        : 'bg-transparent text-neutral-700 dark:text-neutral-300 border-neutral-300 dark:border-neutral-700 hover:border-neutral-500'
+    }`;
 
   return (
     <div className={`fixed inset-0 z-[60] overflow-y-auto overscroll-contain ${bg}`}>
@@ -156,42 +218,121 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Thư viện */}
         <section>
           <h2 className="text-xs uppercase tracking-widest text-neutral-500 font-sans tabular-nums mb-3">
-            Thư viện · {novels.length} truyện
+            Thư viện · {hasFilter ? `${filtered.length}/${novels.length}` : novels.length} truyện
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {items.map(({ novel, resume }) => {
-              const pct = percentOf(resume, novel);
-              return (
-                <button key={novel.id} onClick={() => onRead(novel)} className="text-left group flex flex-col self-start w-full">
-                  <div className="relative">
-                    <NovelCover
-                      title={novel.title}
-                      cover={novel.cover}
-                      className="w-full aspect-[2/3] rounded-lg shadow-sm group-active:opacity-80"
-                    />
-                    {pct > 0 && (
-                      <div className="absolute left-0 right-0 bottom-0 h-1 bg-black/30 rounded-b-lg overflow-hidden">
-                        <div className="h-full bg-white" style={{ width: `${pct}%` }} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-2 text-sm font-medium leading-snug line-clamp-2">{novel.title}</div>
-                  <div className="text-[11px] text-neutral-500 font-sans tabular-nums mt-0.5">
-                    {pct > 0 ? `${pct}% · ` : ''}
-                    {novel.chapters.length} chương
-                  </div>
-                </button>
-              );
-            })}
 
-            <button
-              onClick={onOpenImport}
-              className="aspect-[2/3] rounded-lg border-2 border-dashed border-neutral-300 dark:border-neutral-700 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:border-neutral-500"
-            >
-              <PlusOutlined className="text-xl" />
-              <span className="text-sm">Nhập truyện</span>
-            </button>
-          </div>
+          {/* Tìm và lọc theo thể loại, tác giả */}
+          {novels.length > 1 && (
+            <div className="space-y-3 mb-4">
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                prefix={<SearchOutlined className="text-neutral-400" />}
+                placeholder="Tìm theo tên truyện hoặc tác giả"
+                allowClear
+                size="large"
+              />
+
+              {categoryCounts.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 [scrollbar-width:none]">
+                  <button className={chip(category === null)} onClick={() => setCategory(null)}>
+                    Tất cả
+                  </button>
+                  {categoryCounts.map(([name, count]) => (
+                    <button
+                      key={name}
+                      className={chip(category !== null && category !== UNCATEGORIZED && sameName(category, name))}
+                      onClick={() => setCategory(category && sameName(category, name) ? null : name)}
+                    >
+                      {name} <span className="opacity-60 tabular-nums">{count}</span>
+                    </button>
+                  ))}
+                  {uncategorizedCount > 0 && (
+                    <button
+                      className={chip(category === UNCATEGORIZED)}
+                      onClick={() => setCategory(category === UNCATEGORIZED ? null : UNCATEGORIZED)}
+                    >
+                      Chưa phân loại <span className="opacity-60 tabular-nums">{uncategorizedCount}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {authorCounts.length > 0 && (
+                <Select
+                  value={author}
+                  onChange={(v) => setAuthor(v ?? null)}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Lọc theo tác giả"
+                  size="large"
+                  className="w-full"
+                  options={authorCounts.map(([name, count]) => ({ value: name, label: `${name} (${count})` }))}
+                />
+              )}
+            </div>
+          )}
+
+          {filtered.length === 0 && hasFilter ? (
+            <div className="py-10 text-center text-sm text-neutral-500 space-y-3">
+              <p className="m-0">Không có truyện nào khớp bộ lọc.</p>
+              <Button onClick={clearFilters}>Bỏ lọc</Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {filtered.map(({ novel, resume }) => {
+                const pct = percentOf(resume, novel);
+                return (
+                  <div key={novel.id} className="relative">
+                    <button onClick={() => onRead(novel)} className="text-left group flex flex-col w-full">
+                      <div className="relative">
+                        <NovelCover
+                          title={novel.title}
+                          cover={novel.cover}
+                          className="w-full aspect-[2/3] rounded-lg shadow-sm group-active:opacity-80"
+                        />
+                        {pct > 0 && (
+                          <div className="absolute left-0 right-0 bottom-0 h-1 bg-black/30 rounded-b-lg overflow-hidden">
+                            <div className="h-full bg-white" style={{ width: `${pct}%` }} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-2 text-sm font-medium leading-snug line-clamp-2">{novel.title}</div>
+                      {novel.author && (
+                        <div className="text-[11px] text-neutral-500 truncate mt-0.5">{novel.author}</div>
+                      )}
+                      {novel.categories && novel.categories.length > 0 && (
+                        <div className="text-[11px] text-neutral-400 truncate">{novel.categories.join(' · ')}</div>
+                      )}
+                      <div className="text-[11px] text-neutral-500 font-sans tabular-nums mt-0.5">
+                        {pct > 0 ? `${pct}% · ` : ''}
+                        {novel.chapters.length} chương
+                      </div>
+                    </button>
+
+                    {/* Sửa thể loại, tác giả, bìa */}
+                    <button
+                      onClick={() => onEditNovel(novel)}
+                      aria-label={`Sửa thông tin ${novel.title}`}
+                      title="Sửa thể loại, tác giả, bìa"
+                      className="absolute top-1.5 right-1.5 w-9 h-9 flex items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm hover:bg-black/65"
+                    >
+                      <EditOutlined />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <button
+                onClick={onOpenImport}
+                className="aspect-[2/3] rounded-lg border-2 border-dashed border-neutral-300 dark:border-neutral-700 flex flex-col items-center justify-center gap-2 text-neutral-500 hover:border-neutral-500"
+              >
+                <PlusOutlined className="text-xl" />
+                <span className="text-sm">Nhập truyện</span>
+              </button>
+            </div>
+          )}
         </section>
       </div>
     </div>

@@ -5,14 +5,17 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   getDocFromCache,
   onSnapshot,
+  updateDoc,
   writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Chapter, Novel } from '../types/novel';
+import { normalizeCategories } from '../utils/categories';
 
 const NOVELS = 'novels';
 const BATCH_MAX_DOCS = 200;
@@ -29,12 +32,19 @@ export function subscribeNovels(
     collection(db, NOVELS),
     (snap) => {
       const novels: Novel[] = snap.docs.map((d) => {
-        const data = d.data() as { title?: string; chapters?: Chapter[]; author?: string; cover?: string };
+        const data = d.data() as {
+          title?: string;
+          chapters?: Chapter[];
+          author?: string;
+          categories?: string[];
+          cover?: string;
+        };
         return {
           id: d.id,
           title: data.title || 'Không tên',
           chapters: Array.isArray(data.chapters) ? data.chapters : [],
           author: data.author || undefined,
+          categories: Array.isArray(data.categories) ? normalizeCategories(data.categories) : undefined,
           cover: data.cover || undefined,
         };
       });
@@ -383,7 +393,7 @@ export async function importNovel(
   title: string,
   sorted: ChapterSource[],
   onProgress?: (p: ImportProgress) => void,
-  meta?: { author?: string; cover?: string }
+  meta?: { author?: string; cover?: string; categories?: string[] }
 ): Promise<ImportResult> {
   const novelTitle = title.trim();
   if (!novelTitle) throw new Error('Thiếu tên truyện');
@@ -442,7 +452,15 @@ export async function importNovel(
   // Ghi mục lục sau cùng: truyện chỉ hiện ra khi đã đủ nội dung
   const author = meta?.author?.trim() || undefined;
   const cover = meta?.cover || undefined;
-  const novel: Novel = { id: novelId, title: novelTitle, chapters, author, cover };
+  const categories = normalizeCategories(meta?.categories);
+  const novel: Novel = {
+    id: novelId,
+    title: novelTitle,
+    chapters,
+    author,
+    cover,
+    categories: categories.length ? categories : undefined,
+  };
   const indexBatch = writeBatch(db);
   indexBatch.set(doc(db, NOVELS, novelId), {
     title: novelTitle,
@@ -450,10 +468,26 @@ export async function importNovel(
     updatedAt: Date.now(),
     ...(author ? { author } : {}),
     ...(cover ? { cover } : {}),
+    ...(categories.length ? { categories } : {}),
   });
   await indexBatch.commit();
 
   return { novel, skipped };
+}
+
+// Sửa thông tin một bộ truyện đã có (không đụng tới nội dung chương)
+export async function updateNovelInfo(
+  novelId: string,
+  info: { author?: string; categories?: string[]; cover?: string | null }
+): Promise<void> {
+  const author = info.author?.trim();
+  const categories = normalizeCategories(info.categories);
+  const data: Record<string, unknown> = {
+    author: author ? author : deleteField(),
+    categories: categories.length ? categories : deleteField(),
+  };
+  if (info.cover !== undefined) data.cover = info.cover ? info.cover : deleteField(); // undefined = giữ nguyên
+  await updateDoc(doc(db, NOVELS, novelId), data);
 }
 
 export async function deleteNovel(novel: Novel): Promise<void> {

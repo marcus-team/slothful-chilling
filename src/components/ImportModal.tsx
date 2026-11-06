@@ -6,13 +6,14 @@ import { AppUser } from '../services/firebase';
 import {
   ChapterSource,
   ImportProgress,
-  imageToCover,
   importNovel,
   isChapterFile,
   isEpubFile,
   readEpub,
   sourcesFromFiles,
 } from '../services/library';
+import { NovelInfoFields } from './NovelInfoFields';
+import { sameName } from '../utils/categories';
 
 interface ImportModalProps {
   open: boolean;
@@ -42,14 +43,23 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [cover, setCover] = useState<string | undefined>(undefined);
-  const coverInput = useRef<HTMLInputElement>(null);
+  const [categories, setCategories] = useState<string[]>([]);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
   const sources = useMemo(() => epubSources ?? sourcesFromFiles(files), [epubSources, files]);
-  const willOverwrite = useMemo(
-    () => novels.some((n) => n.title.trim().toLowerCase() === title.trim().toLowerCase()),
+  const existing = useMemo(
+    () => (title.trim() ? novels.find((n) => sameName(n.title, title)) : undefined),
     [novels, title]
+  );
+  const willOverwrite = !!existing;
+  const knownAuthors = useMemo(
+    () => Array.from(new Set(novels.map((n) => n.author).filter((a): a is string => !!a))).sort(),
+    [novels]
+  );
+  const knownCategories = useMemo(
+    () => Array.from(new Set(novels.flatMap((n) => n.categories || []))).sort(),
+    [novels]
   );
 
   const pick = async (list: FileList | null, fromFolder: boolean) => {
@@ -90,8 +100,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setTitle('');
     setAuthor('');
     setCover(undefined);
+    setCategories([]);
     setProgress(null);
-    if (coverInput.current) coverInput.current.value = '';
     if (folderInput.current) folderInput.current.value = '';
     if (filesInput.current) filesInput.current.value = '';
   };
@@ -100,7 +110,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsImporting(true);
     setProgress({ stage: 'reading', done: 0, total: sources.length });
     try {
-      const { novel, skipped } = await importNovel(title, sources, setProgress, { author, cover });
+      // Nhập đè lên bộ cũ mà để trống thông tin thì giữ lại thông tin đã có
+      const { novel, skipped } = await importNovel(title, sources, setProgress, {
+        author: author.trim() || existing?.author,
+        cover: cover || existing?.cover,
+        categories: categories.length > 0 ? categories : existing?.categories,
+      });
       message.success(`Đã nhập "${novel.title}" (${novel.chapters.length} chương)`);
       if (skipped.length > 0) {
         message.warning(`Bỏ qua ${skipped.length} file không đọc được: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`, 8);
@@ -233,47 +248,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               )}
             </div>
 
-            <div className="space-y-1">
-              <label className="text-xs text-neutral-500">Tác giả (tùy chọn)</label>
-              <Input
-                value={author}
-                onChange={(e) => setAuthor(e.target.value)}
-                placeholder="Tên tác giả"
-                disabled={isImporting}
-              />
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-[72px] rounded border border-neutral-200 dark:border-neutral-700 bg-neutral-100 dark:bg-neutral-800 overflow-hidden shrink-0 flex items-center justify-center text-[10px] text-neutral-400">
-                {cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : 'Bìa'}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button size="small" onClick={() => coverInput.current?.click()} disabled={isImporting}>
-                  {cover ? 'Đổi ảnh bìa' : 'Chọn ảnh bìa'}
-                </Button>
-                {cover && (
-                  <Button size="small" onClick={() => setCover(undefined)} disabled={isImporting}>
-                    Bỏ ảnh bìa
-                  </Button>
-                )}
-              </div>
-              <input
-                ref={coverInput}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={async (e) => {
-                  const img = e.target.files?.[0];
-                  if (!img) return;
-                  try {
-                    setCover(await imageToCover(img));
-                  } catch {
-                    message.error('Không đọc được ảnh này');
-                  }
-                  e.target.value = '';
-                }}
-              />
-            </div>
+            <NovelInfoFields
+              author={author}
+              categories={categories}
+              cover={cover}
+              knownAuthors={knownAuthors}
+              knownCategories={knownCategories}
+              disabled={isImporting}
+              onAuthor={setAuthor}
+              onCategories={setCategories}
+              onCover={setCover}
+            />
 
             {isImporting && progress ? (
               <div className="space-y-1">

@@ -7,6 +7,7 @@ import { useOverscrollNavigation } from './hooks/useOverscrollNavigation';
 import { useWakeLock } from './hooks/useWakeLock';
 import { HomeScreen } from './components/HomeScreen';
 import { TtsBar } from './components/TtsBar';
+import { NovelInfoModal } from './components/NovelInfoModal';
 import { loadProgress, saveProgress, RemoteProgress } from './services/progress';
 import { splitParagraphs } from './utils/text';
 import { ImportModal } from './components/ImportModal';
@@ -142,6 +143,7 @@ export default function App() {
   const [showHome, setShowHome] = useState(true); // mở app là vào trang chủ "Đọc tiếp"
   const [ttsOpen, setTtsOpen] = useState(false);
   const [ttsIndex, setTtsIndex] = useState<number | null>(null);
+  const [editingNovelId, setEditingNovelId] = useState<string | null>(null);
 
   // Giá trị mới nhất cho các listener chạy một lần
   const userRef = useRef(user);
@@ -768,6 +770,7 @@ export default function App() {
           getResume={getResume}
           currentNovelId={currentNovel.id}
           onRead={startNovel}
+          onEditNovel={(novel) => setEditingNovelId(novel.id)}
           onClose={() => setShowHome(false)}
           onOpenImport={() => setIsImportOpen(true)}
         />
@@ -787,6 +790,12 @@ export default function App() {
 
       {/* Nhập truyện & tài khoản */}
       {importModal}
-    </div>
+
+      {/* Sửa thể loại, tác giả, bìa của một bộ truyện */}
+      <NovelInfoModal
+        novel={allNovels.find((n) => n.id === editingNovelId) || null}
+        novels={allNovels}
+        onClose={() => setEditingNovelId(null)}
+      />
   );
 }

@@ -9,6 +9,7 @@ export interface Novel {
   title: string;
   chapters: Chapter[];
   author?: string;
+  categories?: string[]; // thể loại (có thể nhiều)
   cover?: string; // ảnh bìa thu nhỏ dạng data URL
 }
 
