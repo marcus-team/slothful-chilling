@@ -249,7 +249,13 @@ export const TtsBar: React.FC<TtsBarProps> = ({
             prefetch();
           } catch (err: any) {
             if (token !== tokenRef.current) return;
-            if (err?.name === 'NotAllowedError') fail(explainError('not-allowed'));
+            if (err?.code === 'config') {
+              // Azure chưa được cài trên máy chủ: tạm dùng giọng của máy (không lưu lựa chọn, cài xong Azure sẽ tự dùng lại)
+              voiceRef.current = '';
+              setVoiceId('');
+              speakFrom(i);
+              setNotice('Giọng Azure chưa được cài, đang dùng giọng của máy.');
+            } else if (err?.name === 'NotAllowedError') fail(explainError('not-allowed'));
             else if (err?.name === 'AbortError') return; // bị chặn do vừa chuyển đoạn khác
             else fail(explainAzureError(err));
           }
