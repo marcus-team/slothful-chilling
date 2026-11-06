@@ -9,7 +9,7 @@ import {
   FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { PWAInstallButton } from './PWAInstallButton';
-import { GoogleUser } from '../services/googleAuth';
+import { AppUser } from '../services/firebase';
 
 interface ReaderHeaderProps {
   currentNovel: Novel;
@@ -18,8 +18,8 @@ interface ReaderHeaderProps {
   isSidebarOpen: boolean;
   settings: ReadingSettings;
   onUpdateSettings: (newSettings: Partial<ReadingSettings>) => void;
-  onOpenDriveModal: () => void;
-  user: GoogleUser | null;
+  onOpenImport: () => void;
+  user: AppUser | null;
   scrollProgress: number; // 0 to 1
   isZenMode: boolean;
   onToggleZenMode: () => void;
@@ -47,7 +47,7 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
   isSidebarOpen,
   settings,
   onUpdateSettings,
-  onOpenDriveModal,
+  onOpenImport,
   user,
   scrollProgress,
   isZenMode,
@@ -274,12 +274,12 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
             )}
           </button>
 
-          {/* Google Drive Account / Sync button */}
+          {/* Tài khoản & nhập truyện */}
           <button
-            onClick={onOpenDriveModal}
+            onClick={onOpenImport}
             className={`${iconButton} md:w-auto md:px-2 md:gap-1.5 text-xs font-medium`}
-            aria-label="Đồng bộ Google Drive"
-            title="Đồng bộ Google Drive"
+            aria-label="Tài khoản & nhập truyện"
+            title="Tài khoản & nhập truyện"
           >
             {user ? (
               <>
@@ -296,13 +296,13 @@ export const ReaderHeader: React.FC<ReaderHeaderProps> = ({
                   </div>
                 )}
                 <span className="hidden md:inline truncate max-w-[80px]">
-                  {user.displayName?.split(' ')[0] || 'Drive'}
+                  {user.displayName?.split(' ')[0] || 'Tài khoản'}
                 </span>
               </>
             ) : (
               <>
                 <CloudSyncOutlined className="text-base" />
-                <span className="hidden md:inline">Drive</span>
+                <span className="hidden md:inline">Đăng nhập</span>
               </>
             )}
           </button>

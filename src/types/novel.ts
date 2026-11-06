@@ -2,22 +2,12 @@ export interface Chapter {
   id: string;
   title: string;
   order: number;
-  content?: string;
-  wordCount?: number;
-  fileId?: string;
-  mimeType?: string;
-  source: 'drive' | 'builtin';
 }
 
 export interface Novel {
   id: string;
   title: string;
-  author?: string;
-  description?: string;
-  folderId?: string;
   chapters: Chapter[];
-  coverUrl?: string;
-  source: 'drive' | 'builtin';
 }
 
 export type FontFamily = 'sans' | 'serif' | 'mono';

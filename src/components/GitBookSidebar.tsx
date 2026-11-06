@@ -23,8 +23,8 @@ interface GitBookSidebarProps {
   onOpenLibrary: () => void;
   isOpen: boolean;
   onClose: () => void;
-  onOpenDriveModal: () => void;
-  isDriveConnected: boolean;
+  onOpenImport: () => void;
+  isSignedIn: boolean;
   readingHistory: Record<string, ReadingHistoryItem>;
 }
 
@@ -42,8 +42,8 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
   onOpenLibrary,
   isOpen,
   onClose,
-  onOpenDriveModal,
-  isDriveConnected,
+  onOpenImport,
+  isSignedIn,
   readingHistory,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,13 +199,13 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
 
           <div className="flex items-center gap-1">
             <button
-              onClick={onOpenDriveModal}
-              aria-label={isDriveConnected ? 'Đã kết nối Google Drive' : 'Kết nối Google Drive'}
-              title={isDriveConnected ? 'Đã kết nối Google Drive' : 'Kết nối Google Drive'}
+              onClick={onOpenImport}
+              aria-label={isSignedIn ? 'Đã đăng nhập' : 'Đăng nhập'}
+              title={isSignedIn ? 'Đã đăng nhập' : 'Đăng nhập'}
               className="p-2.5 rounded text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors"
             >
               <CloudSyncOutlined
-                className={`text-base ${isDriveConnected ? 'text-neutral-900 dark:text-white' : ''}`}
+                className={`text-base ${isSignedIn ? 'text-neutral-900 dark:text-white' : ''}`}
               />
             </button>
             <button
@@ -307,19 +307,19 @@ export const GitBookSidebar: React.FC<GitBookSidebarProps> = ({
           <div className="flex items-center gap-1.5">
             <span
               className={`w-2 h-2 rounded-full ${
-                isDriveConnected ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300'
+                isSignedIn ? 'bg-neutral-800 dark:bg-neutral-200' : 'bg-neutral-300'
               }`}
             />
             <span className="text-[11px]">
-              {isDriveConnected ? 'Drive đã kết nối' : 'Chưa kết nối Drive'}
+              {isSignedIn ? 'Đã đăng nhập' : 'Chưa đăng nhập'}
             </span>
           </div>
 
           <button
-            onClick={onOpenDriveModal}
+            onClick={onOpenImport}
             className="text-xs py-1 text-neutral-700 dark:text-neutral-300 hover:underline flex items-center gap-1"
           >
-            <span>Đồng bộ</span>
+            <span>Nhập truyện</span>
             <RightOutlined className="text-[9px]" />
           </button>
         </div>

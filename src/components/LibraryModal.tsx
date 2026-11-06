@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Modal, Popconfirm, Progress } from 'antd';
-import { CloudSyncOutlined, DeleteOutlined } from '@ant-design/icons';
+import { UploadOutlined, DeleteOutlined } from '@ant-design/icons';
 import { Chapter, Novel } from '../types/novel';
 
 export interface NovelResume {
@@ -17,7 +17,7 @@ interface LibraryModalProps {
   getResume: (novel: Novel) => NovelResume | null;
   onSelectNovel: (novel: Novel) => void;
   onRemoveNovel: (novel: Novel) => void;
-  onOpenDriveModal: () => void;
+  onOpenImport: () => void;
 }
 
 export const LibraryModal: React.FC<LibraryModalProps> = ({
@@ -28,7 +28,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   getResume,
   onSelectNovel,
   onRemoveNovel,
-  onOpenDriveModal,
+  onOpenImport,
 }) => {
   // Truyện đọc gần nhất lên đầu
   const items = useMemo(() => {
@@ -93,8 +93,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                 </button>
 
                 <Popconfirm
-                  title="Xóa khỏi tủ truyện?"
-                  description="Chỉ xóa khỏi app, file trên Drive không bị ảnh hưởng."
+                  title="Xóa truyện này?"
+                  description="Xóa truyện và toàn bộ chương khỏi thư viện (file gốc trên máy bạn không bị ảnh hưởng)."
                   okText="Xóa"
                   cancelText="Hủy"
                   onConfirm={() => onRemoveNovel(novel)}
@@ -114,12 +114,12 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
         <button
           onClick={() => {
             onClose();
-            onOpenDriveModal();
+            onOpenImport();
           }}
           className="w-full flex items-center justify-center gap-2 py-3 min-h-[48px] rounded-lg border border-dashed border-neutral-300 dark:border-neutral-700 text-sm text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors"
         >
-          <CloudSyncOutlined />
-          <span>Đồng bộ thêm từ Google Drive</span>
+          <UploadOutlined />
+          <span>Nhập thêm truyện</span>
         </button>
       </div>
     </Modal>

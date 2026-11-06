@@ -144,10 +144,6 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
               <ClockCircleOutlined className="text-neutral-400" />
               <span>~{readingTimeMinutes} phút đọc</span>
             </span>
-            <span aria-hidden="true" className="text-neutral-300 dark:text-neutral-700">·</span>
-            <span className="capitalize">
-              Nguồn: {currentChapter.source === 'drive' ? 'Google Drive' : 'Thư viện'}
-            </span>
           </div>
         </header>
 
@@ -159,15 +155,15 @@ export const ReaderCanvas: React.FC<ReaderCanvasProps> = ({
                 <LoadingOutlined className="text-neutral-900 dark:text-neutral-100" style={{ fontSize: 28 }} spin />
               }
             />
-            <p className="text-sm text-neutral-500">Đang tải chương từ Google Drive...</p>
+            <p className="text-sm text-neutral-500">Đang tải chương...</p>
           </div>
         ) : status === 'needs-auth' ? (
           <div className="py-20 text-center space-y-4">
             <p className="text-sm text-neutral-600 dark:text-neutral-400 max-w-xs mx-auto leading-relaxed">
-              Chương này lưu trên Google Drive. Kết nối lại để tiếp tục đọc từ chỗ bạn đang dừng.
+              Phiên đăng nhập đã hết hạn. Đăng nhập lại để tiếp tục đọc.
             </p>
             <Button type="primary" size="large" onClick={onReconnect} className="h-12 px-6">
-              Kết nối lại Google Drive
+              Đăng nhập lại
             </Button>
           </div>
         ) : status === 'error' ? (

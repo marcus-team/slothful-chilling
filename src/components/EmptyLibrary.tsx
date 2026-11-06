@@ -1,30 +1,31 @@
 import React from 'react';
-import { Button, Progress } from 'antd';
-import { CloudSyncOutlined, GoogleOutlined } from '@ant-design/icons';
-import { GoogleUser } from '../services/googleAuth';
-import { ScanProgress } from '../services/googleDrive';
+import { Button, Spin } from 'antd';
+import { GoogleOutlined, UploadOutlined, LoadingOutlined } from '@ant-design/icons';
+import { AppUser } from '../services/firebase';
 
 interface EmptyLibraryProps {
-  user: GoogleUser | null;
+  authReady: boolean; // đã biết đăng nhập hay chưa
+  user: AppUser | null;
   isLoggingIn: boolean;
-  scanProgress: ScanProgress | null;
+  libraryLoaded: boolean; // đã nhận danh sách truyện từ server
+  loadError: string;
   onLogin: () => void;
-  onOpenDriveModal: () => void;
+  onLogout: () => void;
+  onOpenImport: () => void;
 }
 
-// Màn mở đầu khi thư viện còn trống: dẫn thẳng người dùng tới việc kết nối Drive
+// Màn khi chưa có truyện để đọc: chờ, đăng nhập, báo lỗi quyền, hoặc nhập truyện đầu tiên
 export const EmptyLibrary: React.FC<EmptyLibraryProps> = ({
+  authReady,
   user,
   isLoggingIn,
-  scanProgress,
+  libraryLoaded,
+  loadError,
   onLogin,
-  onOpenDriveModal,
+  onLogout,
+  onOpenImport,
 }) => {
-  const isScanning = scanProgress !== null;
-  const percent =
-    scanProgress && scanProgress.total > 0
-      ? Math.round((scanProgress.done / scanProgress.total) * 100)
-      : 0;
+  const waiting = !authReady || (user && !libraryLoaded && !loadError);
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100">
@@ -35,51 +36,54 @@ export const EmptyLibrary: React.FC<EmptyLibraryProps> = ({
           className="w-16 h-16 rounded-full mx-auto object-contain"
         />
 
-        <div className="space-y-2">
-          <h1 className="text-xl font-bold tracking-tight">slothfulchilling</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed">
-            {user
-              ? 'Chưa tìm thấy truyện nào trên Google Drive của bạn.'
-              : 'Kết nối Google Drive để đọc truyện của bạn. Mỗi thư mục ở gốc Drive là một bộ truyện.'}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold tracking-tight">slothfulchilling</h1>
 
-        {isScanning ? (
-          <div className="space-y-2">
-            <Progress percent={percent} showInfo={false} strokeColor="#111" size="small" />
-            <p className="text-xs text-neutral-500 truncate">
-              Đang quét Drive… {scanProgress!.done}/{scanProgress!.total}
-              {scanProgress!.name ? ` · ${scanProgress!.name}` : ''}
+        {waiting ? (
+          <Spin indicator={<LoadingOutlined style={{ fontSize: 24 }} spin />} />
+        ) : !user ? (
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              Đăng nhập để mở thư viện truyện của bạn.
             </p>
-          </div>
-        ) : user ? (
-          <div className="space-y-3">
             <Button
               type="primary"
               size="large"
               block
-              icon={<CloudSyncOutlined />}
-              onClick={onOpenDriveModal}
+              loading={isLoggingIn}
+              icon={<GoogleOutlined />}
+              onClick={onLogin}
               className="h-12"
             >
-              Quét lại Google Drive
+              Đăng nhập với Google
             </Button>
-            <p className="text-xs text-neutral-400">
-              Truyện cần là thư mục chứa file .txt, .md, .docx hoặc Google Docs.
-            </p>
+          </div>
+        ) : loadError ? (
+          <div className="space-y-4">
+            <p className="text-sm text-red-600 leading-relaxed break-words">{loadError}</p>
+            <p className="text-xs text-neutral-500">Đang đăng nhập bằng {user.email}</p>
+            <Button size="large" block onClick={onLogout} className="h-12">
+              Đăng xuất để dùng tài khoản khác
+            </Button>
           </div>
         ) : (
-          <Button
-            type="primary"
-            size="large"
-            block
-            loading={isLoggingIn}
-            icon={<GoogleOutlined />}
-            onClick={onLogin}
-            className="h-12"
-          >
-            Kết nối Google Drive
-          </Button>
+          <div className="space-y-4">
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 leading-relaxed">
+              Thư viện còn trống. Nhập bộ truyện đầu tiên từ thư mục .docx hoặc .txt trên máy bạn.
+            </p>
+            <Button
+              type="primary"
+              size="large"
+              block
+              icon={<UploadOutlined />}
+              onClick={onOpenImport}
+              className="h-12"
+            >
+              Nhập truyện
+            </Button>
+            <button onClick={onLogout} className="text-xs text-neutral-400 hover:underline">
+              Đăng xuất ({user.email})
+            </button>
+          </div>
         )}
       </div>
     </div>
