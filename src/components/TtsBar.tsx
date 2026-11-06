@@ -21,6 +21,21 @@ const RATES = [0.8, 1, 1.2, 1.5, 1.8, 2];
 const KEY_RATE = 'slothful_tts_rate';
 const KEY_VOICE = 'slothful_tts_voice';
 
+// Mức chất lượng suy ra từ mã giọng của hệ thống (iOS ghi rõ compact / enhanced / premium trong voiceURI)
+const qualityRank = (v: SpeechSynthesisVoice): number => {
+  const id = `${v.voiceURI} ${v.name}`.toLowerCase();
+  if (id.includes('premium')) return 3;
+  if (id.includes('enhanced') || id.includes('nâng cao')) return 2;
+  if (id.includes('compact')) return 0;
+  return 1;
+};
+const qualityLabel = (v: SpeechSynthesisVoice): string => {
+  const r = qualityRank(v);
+  return r === 3 ? 'cao cấp' : r === 2 ? 'nâng cao' : r === 0 ? 'thường' : '';
+};
+const bestFirst = (list: SpeechSynthesisVoice[]) =>
+  [...list].sort((a, b) => qualityRank(b) - qualityRank(a));
+
 const explainError = (code: string): string => {
   switch (code) {
     case 'not-allowed':
@@ -142,7 +157,7 @@ export const TtsBar: React.FC<TtsBarProps> = ({
         u.rate = rateRef.current;
         const all = window.speechSynthesis.getVoices();
         const chosen = all.find((v) => v.voiceURI === voiceRef.current);
-        const viVoice = all.find((v) => v.lang.toLowerCase().startsWith('vi'));
+        const viVoice = bestFirst(all.filter((v) => v.lang.toLowerCase().startsWith('vi')))[0];
         const voice = chosen || viVoice;
         if (voice) {
           u.voice = voice;
@@ -247,7 +262,7 @@ export const TtsBar: React.FC<TtsBarProps> = ({
     onClose();
   };
 
-  const viVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('vi'));
+  const viVoices = bestFirst(voices.filter((v) => v.lang.toLowerCase().startsWith('vi')));
   const voiceOptions = viVoices.length > 0 ? viVoices : voices;
 
   const btn =
@@ -318,11 +333,11 @@ export const TtsBar: React.FC<TtsBarProps> = ({
                   className="w-full h-9 rounded-md border border-neutral-300 dark:border-neutral-700 bg-transparent text-xs px-2"
                 >
                   <option value="">
-                    {viVoices.length > 0 ? 'Giọng mặc định (tiếng Việt)' : 'Máy chưa có giọng tiếng Việt, dùng giọng mặc định'}
+                    {viVoices.length > 0 ? 'Tự chọn giọng tiếng Việt tốt nhất' :'Máy chưa có giọng tiếng Việt, dùng giọng mặc định'}
                   </option>
                   {voiceOptions.map((v) => (
                     <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name} ({v.lang})
+                      {v.name} ({v.lang}){qualityLabel(v) ? ` · ${qualityLabel(v)}` : ''}
                     </option>
                   ))}
                 </select>
