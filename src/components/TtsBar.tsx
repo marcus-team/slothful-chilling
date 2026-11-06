@@ -21,6 +21,21 @@ const RATES = [0.8, 1, 1.2, 1.5, 1.8, 2];
 const KEY_RATE = 'slothful_tts_rate';
 const KEY_VOICE = 'slothful_tts_voice';
 
+const explainError = (code: string): string => {
+  switch (code) {
+    case 'not-allowed':
+      return 'Trình duyệt chặn phát tiếng. Hãy bấm nút phát lại một lần nữa.';
+    case 'language-unavailable':
+    case 'voice-unavailable':
+    case 'synthesis-unavailable':
+      return 'Máy chưa có giọng đọc phù hợp. Vào Cài đặt điện thoại > Chuyển văn bản thành giọng nói, cài giọng Tiếng Việt rồi thử lại.';
+    case 'silent':
+      return 'Chưa nghe thấy tiếng? Kiểm tra âm lượng và chế độ im lặng của điện thoại, và đã cài giọng Tiếng Việt chưa (Cài đặt > Chuyển văn bản thành giọng nói).';
+    default:
+      return `Không đọc được (${code}). Thử chọn giọng khác ở ô bên dưới.`;
+  }
+};
+
 // Đoạn đầu tiên đang hiện trên màn hình (để bắt đầu đọc từ chỗ người dùng đang xem)
 const firstVisibleParagraph = (): number => {
   const els = document.querySelectorAll<HTMLElement>('[data-para]');
@@ -63,6 +78,8 @@ export const TtsBar: React.FC<TtsBarProps> = ({
   const onActiveRef = useRef(onActiveIndex);
   onActiveRef.current = onActiveIndex;
 
+  const [notice, setNotice] = useState('');
+  const startTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playingRef = useRef(false);
   const indexRef = useRef(0);
   const startedRef = useRef(false);
@@ -78,6 +95,7 @@ export const TtsBar: React.FC<TtsBarProps> = ({
 
   const stop = useCallback(() => {
     tokenRef.current += 1;
+    if (startTimerRef.current) clearTimeout(startTimerRef.current);
     if (supported) window.speechSynthesis.cancel();
   }, [supported]);
 
@@ -87,7 +105,12 @@ export const TtsBar: React.FC<TtsBarProps> = ({
       const paras = paragraphsRef.current;
       tokenRef.current += 1;
       const token = tokenRef.current;
-      window.speechSynthesis.cancel();
+      const synth = window.speechSynthesis;
+      // Chỉ hủy khi đang có gì đó đọc: cancel() ngay trước speak() làm một số điện thoại không phát tiếng
+      if (synth.speaking || synth.pending) synth.cancel();
+      synth.resume();
+      if (startTimerRef.current) clearTimeout(startTimerRef.current);
+      setNotice('');
 
       if (i >= paras.length) {
         if (hasNextRef.current) {
@@ -116,20 +139,36 @@ export const TtsBar: React.FC<TtsBarProps> = ({
           return;
         }
         const u = new SpeechSynthesisUtterance(chunks[k++]);
-        u.lang = 'vi-VN';
         u.rate = rateRef.current;
-        const voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === voiceRef.current);
+        const all = window.speechSynthesis.getVoices();
+        const chosen = all.find((v) => v.voiceURI === voiceRef.current);
+        const viVoice = all.find((v) => v.lang.toLowerCase().startsWith('vi'));
+        const voice = chosen || viVoice;
         if (voice) {
           u.voice = voice;
           u.lang = voice.lang;
         }
+        // Máy không có giọng tiếng Việt thì không ép ngôn ngữ, để dùng giọng mặc định (vẫn nghe được)
+        u.onstart = () => {
+          if (startTimerRef.current) clearTimeout(startTimerRef.current);
+          setNotice('');
+        };
         u.onend = next;
         u.onerror = (e) => {
           if (token !== tokenRef.current) return;
           if (e.error === 'canceled' || e.error === 'interrupted') return;
-          next();
+          // Lỗi thật: dừng lại và báo lý do, không lướt qua các đoạn trong im lặng
+          playingRef.current = false;
+          setPlaying(false);
+          tokenRef.current += 1;
+          setNotice(explainError(e.error));
         };
         window.speechSynthesis.speak(u);
+        // Không bắt đầu phát sau vài giây: gợi ý các nguyên nhân thường gặp
+        if (startTimerRef.current) clearTimeout(startTimerRef.current);
+        startTimerRef.current = setTimeout(() => {
+          if (token === tokenRef.current) setNotice(explainError('silent'));
+        }, 4000);
       };
       next();
     },
@@ -265,6 +304,10 @@ export const TtsBar: React.FC<TtsBarProps> = ({
                 <CloseOutlined />
               </button>
             </div>
+
+            {notice && (
+              <p className="m-0 pb-1.5 text-xs leading-snug text-amber-700 dark:text-amber-400">{notice}</p>
+            )}
 
             {voices.length > 0 && (
               <div className="pb-1">
