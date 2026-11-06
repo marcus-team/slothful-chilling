@@ -163,6 +163,153 @@ export function extractChapterOrder(filename: string): number {
 const naturalCompare = (a: string, b: string) =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 
+// ---------------- Nguồn chương (file lẻ hoặc epub) ----------------
+
+export interface ChapterSource {
+  name: string; // dùng để báo lỗi
+  title: string;
+  order: number;
+  read: () => Promise<string>;
+}
+
+export function sourcesFromFiles(files: File[]): ChapterSource[] {
+  const relPath = (f: File) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+  return files
+    .filter(isChapterFile)
+    .map((file) => ({ file, order: extractChapterOrder(file.name), path: relPath(file) }))
+    .sort((a, b) => a.order - b.order || naturalCompare(a.path, b.path))
+    .map(({ file, order }) => ({
+      name: file.name,
+      title: file.name.replace(CHAPTER_EXT, '').trim(),
+      order,
+      read: () => readChapterFile(file),
+    }));
+}
+
+export const isEpubFile = (file: File): boolean => /\.epub$/i.test(file.name);
+
+const XHTML_BLOCKS = 'p,h1,h2,h3,h4,h5,h6,li,pre,blockquote,div,table,ul,ol,section';
+const LEAF_BLOCKS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'PRE', 'DT', 'DD', 'FIGCAPTION', 'TD', 'TH']);
+
+const cleanLine = (s: string) =>
+  s.replace(/\u0001/g, '\n').replace(/[ \t\r\f\v ]+/g, ' ').replace(/ *\n */g, '\n').trim();
+
+// Lấy các đoạn chữ của một trang XHTML theo thứ tự
+function htmlToParagraphs(html: string): { paragraphs: string[]; heading: string } {
+  const body = new DOMParser().parseFromString(html, 'text/html').body;
+  if (!body) return { paragraphs: [], heading: '' };
+  body.querySelectorAll('script,style,nav,svg,img').forEach((n) => n.remove());
+  body.querySelectorAll('br').forEach((n) => n.replaceWith('\u0001'));
+
+  const heading = cleanLine(body.querySelector('h1,h2,h3')?.textContent?.replace(/\s+/g, ' ') || '');
+  const paragraphs: string[] = [];
+  const push = (raw: string | null) => {
+    const t = cleanLine((raw || '').replace(/[\r\n]+/g, ' '));
+    if (t) paragraphs.push(t);
+  };
+  const walk = (el: Element) => {
+    if (LEAF_BLOCKS.has(el.tagName) || !el.querySelector(XHTML_BLOCKS)) {
+      push(el.textContent);
+      return;
+    }
+    el.childNodes.forEach((child) => {
+      if (child.nodeType === 1) walk(child as Element);
+      else if (child.nodeType === 3) push(child.textContent);
+    });
+  };
+  walk(body);
+  return { paragraphs, heading };
+}
+
+// Gộp đường dẫn tương đối trong epub (xử lý "../")
+function resolvePath(baseDir: string, href: string): string {
+  const clean = decodeURIComponent(href.split('#')[0]);
+  const parts = (baseDir ? baseDir.split('/') : []).concat(clean.split('/'));
+  const out: string[] = [];
+  for (const p of parts) {
+    if (p === '..') out.pop();
+    else if (p && p !== '.') out.push(p);
+  }
+  return out.join('/');
+}
+
+// .epub là file zip: container.xml -> file .opf (danh sách + thứ tự chương) -> các trang XHTML
+export async function readEpub(file: File): Promise<{ title: string; sources: ChapterSource[] }> {
+  const files = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+    filter: (f) => /\.(x?html?|opf|ncx|xml)$/i.test(f.name),
+  });
+  const text = (path: string) => (files[path] ? strFromU8(files[path]) : null);
+  const xml = (s: string) => new DOMParser().parseFromString(s, 'application/xml');
+
+  const containerXml = text('META-INF/container.xml');
+  const opfPath = containerXml
+    ? xml(containerXml).getElementsByTagName('rootfile')[0]?.getAttribute('full-path')
+    : Object.keys(files).find((p) => /\.opf$/i.test(p));
+  const opfSrc = opfPath ? text(opfPath) : null;
+  if (!opfPath || !opfSrc) throw new Error('File .epub không hợp lệ (không tìm thấy danh sách chương).');
+
+  const opf = xml(opfSrc);
+  const baseDir = opfPath.includes('/') ? opfPath.slice(0, opfPath.lastIndexOf('/')) : '';
+  const bookTitle =
+    opf.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', 'title')[0]?.textContent?.trim() || '';
+
+  const manifest = new Map<string, { path: string; props: string }>();
+  Array.from(opf.getElementsByTagName('item')).forEach((it) => {
+    const id = it.getAttribute('id');
+    const href = it.getAttribute('href');
+    if (id && href) manifest.set(id, { path: resolvePath(baseDir, href), props: it.getAttribute('properties') || '' });
+  });
+
+  // Tên chương lấy từ mục lục của sách (nav của epub3 hoặc toc.ncx của epub2)
+  const tocTitles = new Map<string, string>();
+  const addToc = (path: string, label: string | null | undefined) => {
+    const t = (label || '').replace(/\s+/g, ' ').trim();
+    if (t && !tocTitles.has(path)) tocTitles.set(path, t);
+  };
+  const navItem = Array.from(manifest.values()).find((m) => m.props.split(/\s+/).includes('nav'));
+  const navSrc = navItem ? text(navItem.path) : null;
+  if (navItem && navSrc) {
+    const navDir = navItem.path.includes('/') ? navItem.path.slice(0, navItem.path.lastIndexOf('/')) : '';
+    const doc = new DOMParser().parseFromString(navSrc, 'text/html');
+    const navs = Array.from(doc.querySelectorAll('nav'));
+    const tocNav = navs.find((n) => (n.getAttribute('epub:type') || '').includes('toc')) || navs[0];
+    tocNav?.querySelectorAll('a[href]').forEach((a) =>
+      addToc(resolvePath(navDir, a.getAttribute('href') || ''), a.textContent)
+    );
+  } else {
+    const ncxPath = Array.from(manifest.values()).find((m) => /\.ncx$/i.test(m.path))?.path;
+    const ncxSrc = ncxPath ? text(ncxPath) : null;
+    if (ncxPath && ncxSrc) {
+      const ncxDir = ncxPath.includes('/') ? ncxPath.slice(0, ncxPath.lastIndexOf('/')) : '';
+      Array.from(xml(ncxSrc).getElementsByTagName('navPoint')).forEach((np) => {
+        const label = np.getElementsByTagName('text')[0]?.textContent;
+        const src = np.getElementsByTagName('content')[0]?.getAttribute('src');
+        if (src) addToc(resolvePath(ncxDir, src), label);
+      });
+    }
+  }
+
+  const sources: ChapterSource[] = [];
+  const spine = Array.from(opf.getElementsByTagName('itemref')).filter((r) => r.getAttribute('linear') !== 'no');
+  for (const ref of spine) {
+    const item = manifest.get(ref.getAttribute('idref') || '');
+    const html = item ? text(item.path) : null;
+    if (!item || !html) continue;
+
+    const { paragraphs, heading } = htmlToParagraphs(html);
+    const chapterTitle = tocTitles.get(item.path) || heading || `Phần ${sources.length + 1}`;
+    if (paragraphs[0] === chapterTitle || paragraphs[0] === heading) paragraphs.shift();
+    const body = paragraphs.join('\n\n');
+    if (body.length < 150) continue; // bìa, trang tên sách, trang trắng...
+
+    const order = sources.length + 1;
+    sources.push({ name: chapterTitle, title: chapterTitle, order, read: async () => body });
+  }
+
+  if (sources.length === 0) throw new Error('Không đọc được chương nào trong file .epub này.');
+  return { title: bookTitle || file.name.replace(/\.epub$/i, ''), sources };
+}
+
 // ---------------- Nhập truyện ----------------
 
 export interface ImportProgress {
@@ -186,19 +333,12 @@ const hashTitle = (title: string) => {
 // Nhập một bộ truyện. Nhập lại cùng tên truyện sẽ ghi đè bộ cũ.
 export async function importNovel(
   title: string,
-  files: File[],
+  sorted: ChapterSource[],
   onProgress?: (p: ImportProgress) => void
 ): Promise<ImportResult> {
   const novelTitle = title.trim();
   if (!novelTitle) throw new Error('Thiếu tên truyện');
-
-  const relPath = (f: File) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-  const sorted = files
-    .filter(isChapterFile)
-    .map((file) => ({ file, order: extractChapterOrder(file.name), path: relPath(file) }))
-    .sort((a, b) => a.order - b.order || naturalCompare(a.path, b.path));
-
-  if (sorted.length === 0) throw new Error('Không có file .docx, .txt hoặc .md nào để nhập.');
+  if (sorted.length === 0) throw new Error('Không có chương nào để nhập.');
 
   const novelId = `n_${hashTitle(novelTitle)}`;
   const chapters: Chapter[] = [];
@@ -222,10 +362,9 @@ export async function importNovel(
   onProgress?.({ stage: 'reading', done: 0, total: sorted.length });
 
   for (let i = 0; i < sorted.length; i++) {
-    const { file, order } = sorted[i];
-    const chapterTitle = file.name.replace(CHAPTER_EXT, '').trim();
+    const { title: chapterTitle, order } = sorted[i];
     try {
-      const text = await readChapterFile(file);
+      const text = await sorted[i].read();
       const bytes = new Blob([text]).size;
       if (!text) throw new Error('Nội dung trống');
       if (bytes > MAX_CHAPTER_BYTES) throw new Error('Chương quá dài (hơn ~900KB)');
@@ -239,8 +378,8 @@ export async function importNovel(
       batchBytes += bytes;
       if (batchDocs >= BATCH_MAX_DOCS || batchBytes >= BATCH_MAX_BYTES) await flush();
     } catch (err: any) {
-      console.warn(`Bỏ qua "${file.name}"`, err);
-      skipped.push(file.name);
+      console.warn(`Bỏ qua "${sorted[i].name}"`, err);
+      skipped.push(sorted[i].name);
     }
     onProgress?.({ stage: 'reading', done: i + 1, total: sorted.length });
   }

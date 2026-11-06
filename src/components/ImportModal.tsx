@@ -3,7 +3,15 @@ import { Modal, Input, Button, Progress, message } from 'antd';
 import { FolderOpenOutlined, FileAddOutlined, DisconnectOutlined, UploadOutlined } from '@ant-design/icons';
 import { Novel } from '../types/novel';
 import { AppUser } from '../services/firebase';
-import { ImportProgress, importNovel, isChapterFile } from '../services/library';
+import {
+  ChapterSource,
+  ImportProgress,
+  importNovel,
+  isChapterFile,
+  isEpubFile,
+  readEpub,
+  sourcesFromFiles,
+} from '../services/library';
 
 interface ImportModalProps {
   open: boolean;
@@ -28,19 +36,38 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const filesInput = useRef<HTMLInputElement>(null);
 
   const [files, setFiles] = useState<File[]>([]);
+  const [epubSources, setEpubSources] = useState<ChapterSource[] | null>(null);
+  const [isReadingEpub, setIsReadingEpub] = useState(false);
   const [title, setTitle] = useState('');
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
-  const chapterFiles = useMemo(() => files.filter(isChapterFile), [files]);
+  const sources = useMemo(() => epubSources ?? sourcesFromFiles(files), [epubSources, files]);
   const willOverwrite = useMemo(
     () => novels.some((n) => n.title.trim().toLowerCase() === title.trim().toLowerCase()),
     [novels, title]
   );
 
-  const pick = (list: FileList | null, fromFolder: boolean) => {
+  const pick = async (list: FileList | null, fromFolder: boolean) => {
     if (!list || list.length === 0) return;
     const picked = Array.from(list);
+    const epub = picked.find(isEpubFile);
+    if (epub && !picked.some(isChapterFile)) {
+      setIsReadingEpub(true);
+      try {
+        const book = await readEpub(epub);
+        setFiles(picked);
+        setEpubSources(book.sources);
+        setTitle(book.title);
+      } catch (err: any) {
+        console.error(err);
+        message.error(err?.message || 'Không đọc được file .epub');
+      } finally {
+        setIsReadingEpub(false);
+      }
+      return;
+    }
+    setEpubSources(null);
     setFiles(picked);
     if (fromFolder) {
       // Tên thư mục đã chọn = tên truyện
@@ -51,6 +78,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const reset = () => {
     setFiles([]);
+    setEpubSources(null);
     setTitle('');
     setProgress(null);
     if (folderInput.current) folderInput.current.value = '';
@@ -59,9 +87,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleImport = async () => {
     setIsImporting(true);
-    setProgress({ stage: 'reading', done: 0, total: chapterFiles.length });
+    setProgress({ stage: 'reading', done: 0, total: sources.length });
     try {
-      const { novel, skipped } = await importNovel(title, chapterFiles, setProgress);
+      const { novel, skipped } = await importNovel(title, sources, setProgress);
       message.success(`Đã nhập "${novel.title}" (${novel.chapters.length} chương)`);
       if (skipped.length > 0) {
         message.warning(`Bỏ qua ${skipped.length} file không đọc được: ${skipped.slice(0, 3).join(', ')}${skipped.length > 3 ? '…' : ''}`, 8);
@@ -124,7 +152,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           <p className="text-sm font-medium m-0">Thêm một bộ truyện</p>
           <p className="text-xs text-neutral-500 m-0 leading-relaxed">
             Chọn thư mục chứa các chương (có thể có thư mục con như 1-50, 51-100), hoặc chọn nhiều file
-            .docx / .txt. App tự sắp xếp theo số chương trong tên file.
+            .docx / .txt, hoặc một file .epub. App tự sắp xếp theo số chương trong tên file.
           </p>
 
           <div className="grid grid-cols-2 gap-2">
@@ -132,7 +160,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               size="large"
               icon={<FolderOpenOutlined />}
               onClick={() => folderInput.current?.click()}
-              disabled={isImporting}
+              disabled={isImporting || isReadingEpub}
               className="h-12"
             >
               Chọn thư mục
@@ -141,7 +169,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               size="large"
               icon={<FileAddOutlined />}
               onClick={() => filesInput.current?.click()}
-              disabled={isImporting}
+              disabled={isImporting || isReadingEpub}
+              loading={isReadingEpub}
               className="h-12"
             >
               Chọn file
@@ -160,7 +189,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             ref={filesInput}
             type="file"
             multiple
-            accept=".docx,.txt,.md"
+            accept=".docx,.txt,.md,.epub"
             className="hidden"
             onChange={(e) => pick(e.target.files, false)}
           />
@@ -170,9 +199,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         {files.length > 0 && (
           <div className="space-y-3 rounded-lg border border-neutral-200 dark:border-neutral-800 p-3">
             <div className="text-sm">
-              Tìm thấy <b>{chapterFiles.length}</b> chương
-              {files.length > chapterFiles.length
-                ? ` (bỏ qua ${files.length - chapterFiles.length} file khác)`
+              Tìm thấy <b>{sources.length}</b> chương
+              {!epubSources && files.length > sources.length
+                ? ` (bỏ qua ${files.length - sources.length} file khác)`
                 : ''}
               .
             </div>
@@ -207,11 +236,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   type="primary"
                   size="large"
                   icon={<UploadOutlined />}
-                  disabled={!title.trim() || chapterFiles.length === 0}
+                  disabled={!title.trim() || sources.length === 0}
                   onClick={handleImport}
                   className="flex-1 h-12"
                 >
-                  Nhập {chapterFiles.length} chương
+                  Nhập {sources.length} chương
                 </Button>
                 <Button size="large" onClick={reset} className="h-12">
                   Hủy
