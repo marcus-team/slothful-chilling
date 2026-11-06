@@ -255,7 +255,16 @@ export default function App() {
   const handleLogin = async () => {
     setIsLoggingIn(true);
     try {
-      await signInWithGoogle();
+      // Popup bị chặn/đóng không báo về thì sau 45s tự thoát khỏi trạng thái chờ
+      await Promise.race([
+        signInWithGoogle(),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Cửa sổ đăng nhập không phản hồi. Hãy cho phép popup rồi thử lại.')),
+            45000
+          )
+        ),
+      ]);
     } catch (err: any) {
       // Người dùng tự đóng cửa sổ đăng nhập thì không cần báo lỗi
       const code = err?.code as string | undefined;
